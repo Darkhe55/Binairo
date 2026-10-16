@@ -98,10 +98,94 @@ try {
   ok('Z 撤销生效', undoInfo.after < undoInfo.before, `${undoInfo.before} → ${undoInfo.after}`)
   ok('Shift+Z 重做生效', undoInfo.redo === undoInfo.before, `${undoInfo.redo}`)
 
-  // 逻辑解题预留提示
+  // 回归：题面给定格必须写进盘面状态，否则校验永远判不了完成、逻辑解题也会漏掉题面
+  const givenState = await page.evaluate(async () => {
+    const api = window.__heibai
+    const s = api.session
+    for (let i = 0; i < s.puzzle.givens.length; i++) {
+      if (!s.puzzle.givens[i]) api.setCell(i, 0)
+    }
+    const givenInState = s.puzzle.givens.every((g, i) => g === 0 || s.state.cells[i] === g)
+    const filledAtStart = s.state.cells.filter((c) => c !== 0).length
+    for (let i = 0; i < s.puzzle.givens.length; i++) {
+      if (!s.puzzle.givens[i]) api.setCell(i, s.puzzle.solution[i])
+    }
+    const v = api.validate()
+    return {
+      givenInState,
+      filledAtStart,
+      solved: v.solved,
+      filled: v.filled,
+      unknown: v.unknown,
+    }
+  })
+  ok(
+    '给定格进入盘面状态，只填非给定格即判定完成',
+    givenState.givenInState && givenState.solved,
+    `给定格在状态中=${givenState.givenInState} 开局已填=${givenState.filledAtStart} 填完 filled=${givenState.filled} unknown=${givenState.unknown}`,
+  )
+
+  // 逻辑解题：必须从当前盘面（给定格 + 玩家已填格）推理，不能冲掉已填格
+  const logicFromCurrent = await page.evaluate(() => {
+    const api = window.__heibai
+    const s = api.session
+    for (let i = 0; i < s.puzzle.givens.length; i++) {
+      if (!s.puzzle.givens[i]) api.setCell(i, 0)
+    }
+    const free = []
+    for (let i = 0; i < s.puzzle.givens.length; i++) if (!s.puzzle.givens[i]) free.push(i)
+    const mine = free.slice(0, 3)
+    for (const i of mine) api.setCell(i, s.puzzle.solution[i])
+    return { mine, before: s.state.cells.filter((c) => c !== 0).length }
+  })
   await page.click('#btn-logic')
+  // 回放是异步的：按钮应立即切到「停止回放」，然后逐帧落子
+  const stopLabel = await page.locator('#btn-logic').textContent()
+  await page.waitForFunction(
+    () =>
+      /回放完毕|自相矛盾|推不出新格子/.test(
+        document.querySelector('#status')?.textContent || '',
+      ),
+    null,
+    { timeout: 30000 },
+  )
   const logicMsg = await page.locator('#status').textContent()
-  ok('逻辑解谜器预留提示', /尚未实现/.test(logicMsg || ''), logicMsg)
+  const logicAfter = await page.evaluate((mine) => {
+    const s = window.__heibai.session
+    const sol = s.puzzle.solution
+    let addedCorrect = true
+    for (let i = 0; i < s.state.cells.length; i++) {
+      if (s.state.cells[i] !== 0 && s.state.cells[i] !== sol[i]) addedCorrect = false
+    }
+    return {
+      filled: s.state.cells.filter((c) => c !== 0).length,
+      mineKept: mine.every((i) => s.state.cells[i] === sol[i]),
+      addedCorrect,
+    }
+  }, logicFromCurrent.mine)
+  ok(
+    '逻辑解题逐帧回放且不冲掉已填格',
+    /回放完毕/.test(logicMsg || '') &&
+      stopLabel === '停止回放' &&
+      logicAfter.filled > logicFromCurrent.before &&
+      logicAfter.mineKept &&
+      logicAfter.addedCorrect,
+    `${logicMsg}（按钮=${stopLabel}，已填 ${logicFromCurrent.before} → ${logicAfter.filled}，已填格保留=${logicAfter.mineKept}，推论全部正确=${logicAfter.addedCorrect}）`,
+  )
+
+  // 整段回放算一个撤销单元：按一次 Z 应整段收回
+  await page.keyboard.press('z')
+  await page.waitForTimeout(80)
+  const afterUndo = await page.evaluate(
+    () => window.__heibai.session.state.cells.filter((c) => c !== 0).length,
+  )
+  ok(
+    '一次撤销收回整段回放',
+    afterUndo === logicFromCurrent.before,
+    `${logicAfter.filled} → ${afterUndo}（回放前 ${logicFromCurrent.before}）`,
+  )
+  await page.keyboard.press('Shift+z')
+  await page.waitForTimeout(80)
 
   // 随机抽题
   await page.click('#btn-random')
@@ -191,6 +275,119 @@ try {
   }
   ok('左键循环可走完（含清除）', JSON.stringify(cycleSeq) === '[1,2,0]', JSON.stringify(cycleSeq))
 
+  /* ———— 左右键拖拽填充 + 右键反向轮换 ———— */
+  const screenOf = (idx) =>
+    page.evaluate((i) => {
+      const s = window.__heibai.session
+      const n = s.puzzle.size
+      const svg = document.querySelector('svg.board-svg')
+      const m = svg.getScreenCTM()
+      const p = svg.createSVGPoint()
+      p.x = 48 * 0.18 + ((i % n) + 0.5) * 48
+      p.y = 48 * 0.18 + (Math.floor(i / n) + 0.5) * 48
+      const q = p.matrixTransform(m)
+      return { x: q.x, y: q.y }
+    }, idx)
+
+  // 逐格移动，保证每一格都收到 pointermove
+  const dragAcross = async (cells, button = 'left') => {
+    const p0 = await screenOf(cells[0])
+    await page.mouse.move(p0.x, p0.y)
+    await page.mouse.down({ button })
+    for (let i = 1; i < cells.length; i++) {
+      const p = await screenOf(cells[i])
+      await page.mouse.move(p.x, p.y)
+    }
+    await page.mouse.up({ button })
+  }
+
+  const clearFree = () =>
+    page.evaluate(() => {
+      const s = window.__heibai.session
+      for (let i = 0; i < s.puzzle.givens.length; i++) {
+        if (!s.puzzle.givens[i]) window.__heibai.setCell(i, 0)
+      }
+    })
+
+  const cellsAt = (cells) =>
+    page.evaluate(
+      (cs) => cs.map((i) => window.__heibai.session.state.cells[i]),
+      cells,
+    )
+
+  // 一行里连续 3 个以上非给定格
+  const runRow = await page.evaluate(() => {
+    const s = window.__heibai.session
+    const n = s.puzzle.size
+    for (let y = 0; y < n; y++) {
+      const run = []
+      for (let x = 0; x < n; x++) {
+        const i = y * n + x
+        if (s.puzzle.givens[i]) {
+          if (run.length >= 3) return run.slice(0, 3)
+          run.length = 0
+        } else run.push(i)
+      }
+      if (run.length >= 3) return run.slice(0, 3)
+    }
+    return null
+  })
+
+  await clearFree()
+  await dragAcross(runRow, 'left')
+  const leftDrag = await cellsAt(runRow)
+  ok('左键拖拽连续填黑', JSON.stringify(leftDrag) === '[1,1,1]', JSON.stringify(leftDrag))
+
+  await clearFree()
+  await dragAcross(runRow, 'right')
+  const rightDrag = await cellsAt(runRow)
+  ok('右键拖拽连续填白', JSON.stringify(rightDrag) === '[2,2,2]', JSON.stringify(rightDrag))
+
+  // 右键点击：空 → 白 → 黑 → 空（反向轮换）
+  await clearFree()
+  const rightClicks = []
+  for (let k = 0; k < 3; k++) {
+    const p = await screenOf(runRow[0])
+    await page.mouse.click(p.x, p.y, { button: 'right' })
+    await page.waitForTimeout(60)
+    rightClicks.push(await page.evaluate((i) => window.__heibai.session.state.cells[i], runRow[0]))
+  }
+  ok('右键点击反向轮换', JSON.stringify(rightClicks) === '[2,1,0]', JSON.stringify(rightClicks))
+
+  // 拖拽经过给定格：给定格的值不能被改，非给定格照常涂色
+  const mixRow = await page.evaluate(() => {
+    const s = window.__heibai.session
+    const n = s.puzzle.size
+    for (let y = 0; y < n; y++) {
+      const row = []
+      for (let x = 0; x < n; x++) row.push(y * n + x)
+      if (row.some((i) => s.puzzle.givens[i]) && row.some((i) => !s.puzzle.givens[i])) return row
+    }
+    return null
+  })
+  const givenBefore = await page.evaluate(() => {
+    const s = window.__heibai.session
+    return s.puzzle.givens.map((g, i) => (g ? s.state.cells[i] : -1))
+  })
+  await clearFree()
+  await dragAcross(mixRow, 'left')
+  const givenAfter = await page.evaluate(() => {
+    const s = window.__heibai.session
+    return s.puzzle.givens.map((g, i) => (g ? s.state.cells[i] : -1))
+  })
+  const freePainted = await page.evaluate(
+    (row) =>
+      row
+        .filter((i) => !window.__heibai.session.puzzle.givens[i])
+        .every((i) => window.__heibai.session.state.cells[i] === 1),
+    mixRow,
+  )
+  ok(
+    '拖拽经过给定格被锁定',
+    JSON.stringify(givenBefore) === JSON.stringify(givenAfter) && freePainted,
+    `给定格未变=${JSON.stringify(givenBefore) === JSON.stringify(givenAfter)} 非给定格已涂黑=${freePainted}`,
+  )
+
   // 自定义题板 + 唯一解校验
   await page.click('#btn-custom')
   ok('自定义编辑器打开', await page.locator('#custom-editor').isVisible())
@@ -202,6 +399,62 @@ try {
   const uniqueMsg = await page.locator('#custom-msg').textContent()
   ok('自定义唯一解校验有响应', !!uniqueMsg && uniqueMsg.length > 0, uniqueMsg || '')
   await page.click('#custom-close')
+
+  // 自定义题板：载入/保存后题板都要保持打开，只有点关闭才收起；保存要能熬过刷新
+  await page.click('#btn-custom')
+  await page.locator('.custom-cell').nth(0).click()
+  await page.locator('.custom-cell').nth(1).click()
+  await page.click('#custom-apply')
+  ok('载入题板后编辑器不自动关闭', await page.locator('#custom-editor').isVisible())
+  await page.click('#custom-save')
+  ok('保存到题库后编辑器仍不关闭', await page.locator('#custom-editor').isVisible())
+  const savedNow = await page.evaluate(() => {
+    const raw = localStorage.getItem('heibai-saved-puzzles')
+    return raw ? JSON.parse(raw).length : 0
+  })
+  ok('自定义题板已写入 localStorage', savedNow === 1, `saved=${savedNow}`)
+  await page.click('#custom-close')
+  ok('点关闭后编辑器收起', !(await page.locator('#custom-editor').isVisible()))
+
+  await page.reload({ waitUntil: 'networkidle' })
+  const savedAfterReload = await page.evaluate(() => {
+    const raw = localStorage.getItem('heibai-saved-puzzles')
+    return raw ? JSON.parse(raw).length : 0
+  })
+  ok('刷新后自定义题板仍在题库', savedAfterReload === 1, `saved=${savedAfterReload}`)
+  ok('刷新后列表包含自定义题', (await page.locator('.puzzle-item').count()) === 6)
+
+  // 删除功能：两步确认 + 删后消失 + 刷新后仍不在 + 内置题不受影响
+  const delBtn = page.locator('.puzzle-del')
+  const delCount = await delBtn.count()
+  ok('只有自定义题带删除按钮', delCount === 1, `删除按钮数=${delCount}`)
+
+  // 第一次点：只进确认态，不删除
+  await delBtn.first().click()
+  await page.waitForTimeout(60)
+  const confirmLabel = await delBtn.first().textContent()
+  const stillThereAfterArm = await page.locator('.puzzle-item').count()
+  ok('第一次点只进入确认态', confirmLabel === '确认' && stillThereAfterArm === 6, `文案=${confirmLabel} 列表=${stillThereAfterArm}`)
+
+  // 第二次点：真删
+  await delBtn.first().click()
+  await page.waitForTimeout(80)
+  const afterDelete = await page.locator('.puzzle-item').count()
+  const delCountAfter = await page.locator('.puzzle-del').count()
+  ok('第二次点确认后删除', afterDelete === 5 && delCountAfter === 0, `列表=${afterDelete} 删除按钮=${delCountAfter}`)
+
+  // 刷新后仍然不在，且 localStorage 已清空
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForTimeout(150)
+  const afterReloadDelete = await page.locator('.puzzle-item').count()
+  const savedEmpty = await page.evaluate(() => {
+    const raw = localStorage.getItem('heibai-saved-puzzles')
+    return !raw || JSON.parse(raw).length === 0
+  })
+  ok('删除后刷新仍不在题库', afterReloadDelete === 5 && savedEmpty, `列表=${afterReloadDelete} localStorage已空=${savedEmpty}`)
+
+  // 内置题不给删（列表里不应再出现任何删除按钮）
+  ok('内置题不带删除按钮', (await page.locator('.puzzle-del').count()) === 0)
 
   await page.screenshot({ path: 'output/ui-check.png', fullPage: true })
   await browser.close()

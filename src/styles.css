@@ -6,6 +6,7 @@
   --line: #d9d2c3;
   --line-strong: #b7ae9a;
   --ink-pieza: #1c1b18;
+  --tree: #2f7d4a;
   --tree-dark: #24613a;
   --trunk: #8a5a2b;
   --tent: #c45c26;
@@ -141,6 +142,46 @@ body {
 .puzzle-item .meta {
   color: var(--ink-soft);
   font-size: 12px;
+}
+
+.puzzle-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.puzzle-row .puzzle-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.puzzle-del {
+  appearance: none;
+  flex: none;
+  width: 38px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbf8f1;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.puzzle-del:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.puzzle-del.confirm {
+  width: auto;
+  padding: 0 10px;
+  border-color: var(--error);
+  background: var(--error-soft);
+  color: var(--error);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .toolbar {
@@ -353,13 +394,6 @@ button.btn:disabled {
 
 .board-svg .clue.bad {
   fill: var(--error);
-}
-
-.footer-note {
-  margin-top: 18px;
-  color: var(--ink-soft);
-  font-size: 12px;
-  text-align: center;
 }
 
 /* ——— 自定义题板 ——— */

@@ -4,6 +4,7 @@
  *   2. 参考解通过 validate（三条规则全满足）
  *   3. 题面给定格与参考解一致（不能自相矛盾）
  *   4. 解唯一（countSolutions === 1）
+ *   5. 逻辑解谜器的每条推论都与参考解一致（soundness）
  *
  * 用法：npm run check
  */
@@ -12,6 +13,7 @@ import { countSolutions } from '../src/solver.ts'
 import { createEmptyState } from '../src/state.ts'
 import { validate } from '../src/validate.ts'
 import { CellState as CS } from '../src/types.ts'
+import { planLogicSolve, RULES } from '../src/logic.ts'
 
 let fail = 0
 const failIf = (cond: boolean, msg: string) => {
@@ -61,6 +63,45 @@ for (const p of puzzles) {
   const givenCount = p.givens.filter((g) => g !== CS.Unknown).length
   console.log(`  ✓ 参考解合法 · 唯一解 · 给定 ${givenCount}/${total} (${((givenCount / total) * 100).toFixed(0)}%)`)
 }
+
+/* ———— 逻辑解谜器：每条推论都必须和参考解一致 ———— */
+
+const colorName = (v: number) => (v === CS.Black ? '黑' : v === CS.White ? '白' : '空')
+
+console.log(`逻辑解谜器规则：${RULES.map((r) => `${r.id}（${r.name}）`).join(' + ')}`)
+
+let solvedByLogic = 0
+for (const p of puzzles) {
+  if (!p.solution) continue
+  const plan = planLogicSolve(p, p.givens)
+  let bad = false
+
+  if (plan.conflicts.length) {
+    failIf(true, `${p.id} 逻辑推论出现矛盾：${plan.conflicts[0]}`)
+    bad = true
+  }
+  for (const s of plan.steps) {
+    if (s.value !== p.solution![s.index]) {
+      failIf(
+        true,
+        `${p.id} 格子 ${s.index} 推论为${colorName(s.value)}，但参考解是${colorName(p.solution![s.index])}（${s.reason}）`,
+      )
+      bad = true
+      break
+    }
+  }
+  if (bad) continue
+
+  if (plan.complete) solvedByLogic++
+  console.log(
+    `  ✓ ${p.id} 仅凭题面推出 ${plan.steps.length}/${p.size * p.size} 格${
+      plan.complete ? '（已全部解出）' : ''
+    }`,
+  )
+}
+console.log(
+  `逻辑解题：${solvedByLogic}/${puzzles.length} 道题能被现有规则完整解出，其余需要更高级的规则\n`,
+)
 
 console.log('')
 if (fail) {

@@ -23,9 +23,9 @@ export function getPuzzle(id: string): Puzzle | undefined {
   return puzzles.find((p) => p.id === id)
 }
 
-export function randomPuzzle(avoidId?: string): Puzzle {
-  const pool = avoidId ? puzzles.filter((p) => p.id !== avoidId) : puzzles
-  const list = pool.length ? pool : puzzles
+export function randomPuzzle(avoidId?: string, pool: Puzzle[] = puzzles): Puzzle {
+  const candidates = avoidId ? pool.filter((p) => p.id !== avoidId) : pool
+  const list = candidates.length ? candidates : pool
   return list[Math.floor(Math.random() * list.length)]!
 }
 

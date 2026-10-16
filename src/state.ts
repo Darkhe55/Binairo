@@ -21,6 +21,17 @@ export function createEmptyState(puzzle: Puzzle): GameState {
   }
 }
 
+/** 把题面给定格并入棋盘状态。
+ *  给定格只存在 puzzle.givens 里（渲染层会叠加显示），但校验、推理都读 state.cells，
+ *  所以载入题目时必须把它们写进状态盘，否则盘面永远少一半信息。 */
+export function applyGivens(puzzle: Puzzle, state: GameState): GameState {
+  for (let i = 0; i < puzzle.givens.length; i++) {
+    const g = puzzle.givens[i]
+    if (g !== CS.Unknown) state.cells[i] = g
+  }
+  return state
+}
+
 export function cellValue(state: GameState, index: number): CellState {
   return state.cells[index] ?? CS.Unknown
 }
