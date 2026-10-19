@@ -115,10 +115,10 @@ app.innerHTML = `
       <div class="custom-editor" id="custom-editor" hidden>
         <h2>自定义题板</h2>
         <div class="custom-row">
-          <label>边长 <input id="custom-n" type="number" min="4" max="14" step="2" value="6" /></label>
+          <label>边长 <input id="custom-n" type="number" min="4" max="40" step="2" value="6" /></label>
           <button class="btn" id="custom-regen" type="button">生成网格</button>
         </div>
-        <div class="custom-hint">点击格子循环：空 → 黑 → 白 → 空，摆好给定格后「载入题板」。</div>
+        <div class="custom-hint">点击格子循环：空 → 黑 → 白 → 空，摆好给定格后「载入题板」。｜ 键盘：方向键移动 · 1 填黑 · 2 填白 · . / 退格清空 · Enter / Tab 下一格 · Home / End 行首行尾</div>
         <div class="custom-grid" id="custom-grid"></div>
         <div class="toolbar" style="margin-top:10px">
           <button class="btn primary" id="custom-apply" type="button">载入题板</button>
@@ -820,53 +820,168 @@ async function playLogicPlan(live: Session, steps: LogicStep[], token: number): 
 
 /* ———————————————————— 自定义题板 ———————————————————— */
 
+/** 自定义题板边长范围（必须偶数，黑白才能各半） */
+const CUSTOM_MIN = 4
+const CUSTOM_MAX = 40
+
 let customN = 6
 let customGivens: CellState[] = new Array<CellState>(36).fill(CS.Unknown)
+/** 键盘光标所在格（0..customN²-1），-1 表示未选 */
+let customCursor = -1
 
 function customMsg(text: string, tone: 'ok' | 'bad' | '' = '') {
   const el = $('#custom-msg')
   el.textContent = text
-  el.className = 'custom-msg' + (tone ? ` ${tone}` : '')
+  el.className = 'custom-msg' + (tone ? ` ${tone}` : ''
+  )
 }
 
 function renderCustomGrid(): void {
   const grid = $('#custom-grid')
+  grid.tabIndex = 0
   grid.style.gridTemplateColumns = `repeat(${customN}, 34px)`
   const parts: string[] = []
   for (let i = 0; i < customN * customN; i++) {
     const v = customGivens[i]
+    const sel = i === customCursor ? ' selected' : ''
     const cls = v === CS.Black ? 'custom-cell black' : v === CS.White ? 'custom-cell white' : 'custom-cell'
-    parts.push(`<button class="${cls}" type="button" data-i="${i}"></button>`)
+    parts.push(`<button class="${cls}${sel}" type="button" data-i="${i}"></button>`)
   }
   grid.innerHTML = parts.join('')
   grid.querySelectorAll<HTMLButtonElement>('.custom-cell').forEach((btn) => {
     btn.addEventListener('click', () => {
       const i = Number(btn.dataset.i)
+      customCursor = i
       customGivens[i] = cycleCell(customGivens[i] ?? CS.Unknown, 1)
       renderCustomGrid()
     })
   })
 }
 
+/** 移动键盘光标并保持它在盘面内；出界时夹住不动 */
+function customMoveCursor(dx: number, dy: number): void {
+  const n = customN
+  if (n <= 0) return
+  const from = customCursor < 0 ? 0 : customCursor
+  const row = Math.floor(from / n)
+  const col = from % n
+  const r = Math.min(Math.max(row + dy, 0), n - 1)
+  const c = Math.min(Math.max(col + dx, 0), n - 1)
+  customCursor = r * n + c
+  renderCustomGrid()
+  // 大题板下把光标滚进可视区
+  const btn = document.querySelector<HTMLButtonElement>(
+    `.custom-cell[data-i="${customCursor}"]`,
+  )
+  btn?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}
+
+/** 跳到某一行的行首/行尾 */
+function customCursorToEdge(edge: 'home' | 'end'): void {
+  const n = customN
+  if (n <= 0) return
+  const row = Math.floor((customCursor < 0 ? 0 : customCursor) / n)
+  customCursor = edge === 'home' ? row * n : row * n + n - 1
+  renderCustomGrid()
+  const btn = document.querySelector<HTMLButtonElement>(
+    `.custom-cell[data-i="${customCursor}"]`,
+  )
+  btn?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}
+
+/** 自定义题板的键盘处理：编辑器开着时才吃这些键，避免和全局快捷键打架 */
+function customEditorKeydown(e: KeyboardEvent): boolean {
+  if ($('#custom-editor').hidden) return false
+  const target = e.target as HTMLElement | null
+  // 在边长输入框里打字不拦截
+  if (target && target.tagName === 'INPUT') return false
+
+  const k = e.key
+  // 1 = 黑，2 = 白（填完自动右移一格）
+  if (k === '1' || k === '2') {
+    e.preventDefault()
+    const value = k === '1' ? CS.Black : CS.White
+    if (customCursor < 0) customCursor = 0
+    customGivens[customCursor] = value
+    renderCustomGrid()
+    customMoveCursor(1, 0)
+    return true
+  }
+  // 清空：. / 退格 / Delete / 空格（退格填完左移，其余右移）
+  if (k === '.' || k === 'Backspace' || k === 'Delete' || k === ' ') {
+    e.preventDefault()
+    if (customCursor < 0) customCursor = 0
+    customGivens[customCursor] = CS.Unknown
+    renderCustomGrid()
+    if (k === 'Backspace') customMoveCursor(-1, 0)
+    else customMoveCursor(1, 0)
+    return true
+  }
+  if (k === 'ArrowLeft') {
+    e.preventDefault()
+    customMoveCursor(-1, 0)
+    return true
+  }
+  if (k === 'ArrowRight') {
+    e.preventDefault()
+    customMoveCursor(1, 0)
+    return true
+  }
+  if (k === 'ArrowUp') {
+    e.preventDefault()
+    customMoveCursor(0, -1)
+    return true
+  }
+  if (k === 'ArrowDown') {
+    e.preventDefault()
+    customMoveCursor(0, 1)
+    return true
+  }
+  // Enter / Tab 下一格，Shift 反向
+  if (k === 'Enter' || k === 'Tab') {
+    e.preventDefault()
+    if (e.shiftKey) customMoveCursor(-1, 0)
+    else customMoveCursor(1, 0)
+    return true
+  }
+  if (k === 'Home') {
+    e.preventDefault()
+    customCursorToEdge('home')
+    return true
+  }
+  if (k === 'End') {
+    e.preventDefault()
+    customCursorToEdge('end')
+    return true
+  }
+  // 编辑器开着时，其余按键一律吞掉：否则 Z/C/R/S 等全局快捷键会在摆题时误触发
+  e.preventDefault()
+  return true
+}
+
 function readCustomSize(): void {
   let n = Number($input('#custom-n').value) || 6
   if (n % 2 !== 0) n += 1
-  customN = Math.min(Math.max(n, 4), 14)
+  customN = Math.min(Math.max(n, CUSTOM_MIN), CUSTOM_MAX)
 }
 
 function regenCustomGrid(): void {
   readCustomSize()
   customGivens = new Array<CellState>(customN * customN).fill(CS.Unknown)
+  customCursor = 0
   renderCustomGrid()
-  customMsg(`已生成 ${customN}×${customN} 网格，点击格子摆给定格。`)
+  customMsg(`已生成 ${customN}×${customN} 网格。方向键移动 · 1 填黑 · 2 填白 · . 清空。`)
+  $('#custom-grid').focus()
 }
 
 function openCustomEditor(): void {
   $('#custom-editor').hidden = false
   readCustomSize()
   customGivens = new Array<CellState>(customN * customN).fill(CS.Unknown)
+  customCursor = 0
   renderCustomGrid()
-  customMsg('点击格子循环：空 → 黑 → 白 → 空。')
+  customMsg('点击格子循环：空 → 黑 → 白 → 空；也可用键盘：方向键移动 · 1 填黑 · 2 填白 · . 清空。')
+  $('#custom-grid').focus()
 }
 
 function closeCustomEditor(): void {
@@ -998,6 +1113,8 @@ function toggleMute(): void {
 window.addEventListener('keydown', (e) => {
   const target = e.target as HTMLElement | null
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+  // 自定义题板开着时，键盘先归题板用，别让全局快捷键（Z/C/R 等）抢走
+  if (customEditorKeydown(e)) return
   const k = e.key.toLowerCase()
   if (k === 'z' && !e.shiftKey) {
     e.preventDefault()

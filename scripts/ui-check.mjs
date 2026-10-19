@@ -400,6 +400,71 @@ try {
   ok('自定义唯一解校验有响应', !!uniqueMsg && uniqueMsg.length > 0, uniqueMsg || '')
   await page.click('#custom-close')
 
+  // 自定义题板键盘输入：1 填黑 / 2 填白 / 方向键移动 / . 清空 / Home-End
+  await page.click('#btn-custom')
+  await page.waitForTimeout(80)
+  const selCell = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('.custom-cell.selected')
+      return el ? Number(el.dataset.i) : -1
+    })
+  const cellCls = (i) =>
+    page.evaluate(
+      (idx) => document.querySelector(`.custom-cell[data-i="${idx}"]`)?.className ?? '',
+      i,
+    )
+  ok('打开编辑器后光标落在首格', (await selCell()) === 0, `cursor=${await selCell()}`)
+
+  await page.keyboard.press('1')
+  ok('按 1 填黑并右移光标', (await cellCls(0)).includes('black') && (await selCell()) === 1,
+    `cell0=${await cellCls(0)} cursor=${await selCell()}`)
+  await page.keyboard.press('2')
+  ok('按 2 填白并右移光标', (await cellCls(1)).includes('white') && (await selCell()) === 2,
+    `cell1=${await cellCls(1)} cursor=${await selCell()}`)
+
+  await page.keyboard.press('ArrowDown')
+  ok('方向键下移一行', (await selCell()) === 8, `cursor=${await selCell()}`)
+  await page.keyboard.press('ArrowRight')
+  ok('方向键右移一格', (await selCell()) === 9, `cursor=${await selCell()}`)
+
+  // 在光标处填黑，退回该格，用 . 清空它并右移
+  await page.keyboard.press('1') // cell9 填黑 → cursor 10
+  ok('按 1 填黑并右移光标', (await cellCls(9)).includes('black') && (await selCell()) === 10,
+    `cell9=${await cellCls(9)} cursor=${await selCell()}`)
+  await page.keyboard.press('ArrowLeft') // 10 → 9（回到刚填黑那格）
+  await page.keyboard.press('.') // 清空 cell9 → cursor 10
+  ok('按 . 清空当前格并右移', !(await cellCls(9)).includes('black') && (await selCell()) === 10,
+    `cell9=${await cellCls(9)} cursor=${await selCell()}`)
+
+  await page.keyboard.press('Home')
+  ok('Home 跳到行首', (await selCell()) === 6, `cursor=${await selCell()}`)
+  await page.keyboard.press('End')
+  ok('End 跳到行尾', (await selCell()) === 11, `cursor=${await selCell()}`)
+
+  // 边界：行首再按左/上不应越界
+  await page.keyboard.press('Home')
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowUp')
+  ok('边界处光标不越界', (await selCell()) === 0, `cursor=${await selCell()}`)
+
+  // 全局快捷键隔离：编辑器开着时按 z/c/r 不应触发撤销/检查/抽题
+  const puzzleBeforeKeys = await page.evaluate(() => window.__heibai.session.puzzle.id)
+  await page.keyboard.press('z')
+  await page.keyboard.press('c')
+  await page.keyboard.press('r')
+  await page.waitForTimeout(150)
+  const puzzleAfterKeys = await page.evaluate(() => window.__heibai.session.puzzle.id)
+  ok('编辑器开着时全局快捷键被屏蔽',
+    puzzleBeforeKeys === puzzleAfterKeys,
+    `${puzzleBeforeKeys} → ${puzzleAfterKeys}`)
+
+  // 键盘摆的格能真的载入并保存
+  await page.click('#custom-apply')
+  await page.waitForTimeout(100)
+  const kbdLoadedSize = await page.evaluate(() => window.__heibai.session.puzzle.size)
+  ok('键盘摆的题板可载入', kbdLoadedSize === 6, `size=${kbdLoadedSize}`)
+  await page.click('#custom-close')
+
   // 自定义题板：载入/保存后题板都要保持打开，只有点关闭才收起；保存要能熬过刷新
   await page.click('#btn-custom')
   await page.locator('.custom-cell').nth(0).click()

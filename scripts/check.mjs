@@ -431,7 +431,126 @@ var halfLockRule = {
     return steps;
   }
 };
-var RULES = [pairEndsRule, halfLockRule];
+var pairUrgencyRule = {
+  id: "pair-urgency",
+  name: "\u6210\u5BF9\u7A7A\u683C\u7EA6\u675F",
+  fn: (ctx) => {
+    const steps = [];
+    const colors = [1 /* Black */, 2 /* White */];
+    for (const line of allLines(ctx.puzzle)) {
+      const cells = line.cells;
+      const n = cells.length;
+      if (n % 2 !== 0) continue;
+      const half = n / 2;
+      const at = (i) => ctx.cells[cells[i]] ?? 0 /* Unknown */;
+      let black = 0;
+      let white = 0;
+      const unknown = [];
+      for (let i = 0; i < n; i++) {
+        const v = at(i);
+        if (v === 1 /* Black */) black++;
+        else if (v === 2 /* White */) white++;
+        else unknown.push(i);
+      }
+      if (!unknown.length) continue;
+      for (const x of colors) {
+        const y = otherColor(x);
+        const needY = half - (x === 1 /* Black */ ? white : black);
+        if (needY <= 0) continue;
+        const dominoes = [];
+        for (let i = 0; i + 1 < n; i++) {
+          if (at(i) !== 0 /* Unknown */ || at(i + 1) !== 0 /* Unknown */) continue;
+          const touchesX = i - 1 >= 0 && at(i - 1) === x || i + 2 < n && at(i + 2) === x;
+          if (touchesX) dominoes.push([i, i + 1]);
+        }
+        if (dominoes.length < needY) continue;
+        const picked = [];
+        let lastEnd = -1;
+        for (const d of [...dominoes].sort((a, b) => a[1] - b[1])) {
+          if (d[0] > lastEnd) {
+            picked.push(d);
+            lastEnd = d[1];
+          }
+        }
+        if (picked.length !== needY) continue;
+        const covered = /* @__PURE__ */ new Set();
+        for (const [a, b] of picked) {
+          covered.add(a);
+          covered.add(b);
+        }
+        for (const i of unknown) {
+          if (covered.has(i)) continue;
+          deduce(
+            ctx,
+            steps,
+            cells[i],
+            x,
+            `${lineLabel(line.kind, line.k)}\u8FD8\u9700 ${needY} \u9897${colorName(y)}\uFF0C${picked.length} \u5904\u4E92\u4E0D\u91CD\u53E0\u7684\u6210\u5BF9\u7A7A\u683C\u5DF2\u5404\u9700\u4E00\u9897\uFF0C\u8986\u76D6\u5916\u7684\u672A\u5B9A\u683C\u53EA\u80FD\u662F${colorName(x)}`
+          );
+        }
+      }
+    }
+    return steps;
+  }
+};
+var twinLineRule = {
+  id: "twin-line",
+  name: "\u53CC\u7A7A\u683C\u67E5\u91CD",
+  fn: (ctx) => {
+    const steps = [];
+    const shapes = allLines(ctx.puzzle).map((line) => {
+      const vals = line.cells.map((i) => ctx.cells[i] ?? 0 /* Unknown */);
+      const unknown = [];
+      vals.forEach((v, i) => {
+        if (v === 0 /* Unknown */) unknown.push(i);
+      });
+      return { line, vals, unknown };
+    });
+    for (const s of shapes) {
+      if (s.unknown.length !== 2) continue;
+      const n = s.vals.length;
+      if (n % 2 !== 0) continue;
+      const half = n / 2;
+      let black = 0;
+      let white = 0;
+      for (const v of s.vals) {
+        if (v === 1 /* Black */) black++;
+        else if (v === 2 /* White */) white++;
+      }
+      if (half - black !== 1 || half - white !== 1) continue;
+      const p = s.unknown[0];
+      const q = s.unknown[1];
+      const label = lineLabel(s.line.kind, s.line.k);
+      for (const t of shapes) {
+        if (t.line.kind !== s.line.kind || t.unknown.length !== 0) continue;
+        let twin = true;
+        for (let i = 0; i < n; i++) {
+          if (i === p || i === q) continue;
+          if (t.vals[i] !== s.vals[i]) {
+            twin = false;
+            break;
+          }
+        }
+        if (!twin) continue;
+        const a = t.vals[p];
+        const b = t.vals[q];
+        if (a === b) continue;
+        const reason = `${label}\u7B2C ${p + 1}\u3001${q + 1} \u683C\u672A\u5B9A\uFF08\u4E00\u9ED1\u4E00\u767D\uFF09\uFF0C\u82E5\u586B${colorName(
+          a
+        )}${colorName(b)} \u5C31\u4F1A\u548C\u5DF2\u5B8C\u6210\u7684\u7B2C ${t.line.k + 1} ${s.line.kind === "row" ? "\u884C" : "\u5217"}\u5B8C\u5168\u76F8\u540C\uFF0C\u53EA\u80FD\u53CD\u8FC7\u6765\u586B`;
+        deduce(ctx, steps, s.line.cells[p], otherColor(a), reason);
+        deduce(ctx, steps, s.line.cells[q], otherColor(b), reason);
+      }
+    }
+    return steps;
+  }
+};
+var RULES = [
+  pairEndsRule,
+  halfLockRule,
+  pairUrgencyRule,
+  twinLineRule
+];
 function planLogicSolve(puzzle, start) {
   const t0 = Date.now();
   const total = puzzle.size * puzzle.size;

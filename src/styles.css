@@ -469,6 +469,16 @@ button.btn:disabled {
   border-color: var(--tree);
 }
 
+/* 键盘光标：题板编辑器里的当前格 */
+.custom-cell.selected {
+  border-color: var(--tree);
+  box-shadow: 0 0 0 2px rgba(47, 125, 74, 0.45);
+}
+
+.custom-grid:focus {
+  outline: none;
+}
+
 .custom-msg {
   margin-top: 8px;
   font-size: 12px;

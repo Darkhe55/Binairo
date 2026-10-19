@@ -5,6 +5,10 @@
  * 已实现的规则（往 RULES 里加即可，主循环已就绪）：
  *   1. 同色两端 / 夹心：连续两个同色 → 两端必须填异色；间隔一个的同色 → 中间必须填异色
  *   2. 半额锁定：某行/列某颜色已达半数 → 剩余空格只能填另一种颜色
+ *   3. 成对空格：某色相邻的两个连续空格至少含一颗异色；若互不重叠的此类区域
+ *      最大数正好等于异色的剩余需求，则区域外的未定格只能是同色
+ *   4. 双空格查重：某行/列只剩两个空格且为一黑一白时，与已完成的同向行/列比较，
+ *      若除这两格外全都一致，则按对方的填法会撞车，只能反过来填
  *
  * 后续可加：行/列查重逼步、假设推演（配合 solver 反证）。
  *
@@ -192,7 +196,175 @@ const halfLockRule: RuleMeta = {
   },
 }
 
-export const RULES: RuleMeta[] = [pairEndsRule, halfLockRule]
+/* ———————————————————— 规则 3：成对空格 urgency ———————————————————— */
+
+/**
+ * 某色棋子 x 沿一个方向相邻两个连续空格（`x _ _` 或 `_ _ x`）时，这两格里至少
+ * 有一颗异色 y——否则两颗都填 x 就成三连了。
+ *
+ * 把整行/整列里所有这样的「两连续空格」收集成一组多米诺，按右端点贪心取最大
+ * 互不重叠子集。若这个最大数量正好等于 y 在该行/列的剩余需求数，说明还需的 y
+ * 全被这些区域吃掉了（每区至少一颗、互不重叠所以正好一人一颗），那么多米诺
+ * 没覆盖到的未定格就不再可能是 y，只能是 x。
+ */
+const pairUrgencyRule: RuleMeta = {
+  id: 'pair-urgency',
+  name: '成对空格约束',
+  fn: (ctx) => {
+    const steps: LogicStep[] = []
+    const colors: CellState[] = [CS.Black, CS.White]
+
+    for (const line of allLines(ctx.puzzle)) {
+      const cells = line.cells
+      const n = cells.length
+      if (n % 2 !== 0) continue // 黑白各半要求边长为偶数
+      const half = n / 2
+      const at = (i: number): CellState => ctx.cells[cells[i]!] ?? CS.Unknown
+
+      let black = 0
+      let white = 0
+      const unknown: number[] = []
+      for (let i = 0; i < n; i++) {
+        const v = at(i)
+        if (v === CS.Black) black++
+        else if (v === CS.White) white++
+        else unknown.push(i)
+      }
+      if (!unknown.length) continue
+
+      for (const x of colors) {
+        const y = otherColor(x)
+        // 这一行/列还要补几颗 y 才够半数
+        const needY = half - (x === CS.Black ? white : black)
+        if (needY <= 0) continue
+
+        // 收集所有「两格皆空、且左邻或右邻是 x」的多米诺 [i, i+1]
+        const dominoes: Array<[number, number]> = []
+        for (let i = 0; i + 1 < n; i++) {
+          if (at(i) !== CS.Unknown || at(i + 1) !== CS.Unknown) continue
+          const touchesX =
+            (i - 1 >= 0 && at(i - 1) === x) || (i + 2 < n && at(i + 2) === x)
+          if (touchesX) dominoes.push([i, i + 1])
+        }
+        // 互不重叠的最多也就这么多个，凑不够需求就不用算了
+        if (dominoes.length < needY) continue
+
+        // 区间按右端点贪心，取最大互不重叠子集
+        const picked: Array<[number, number]> = []
+        let lastEnd = -1
+        for (const d of [...dominoes].sort((a, b) => a[1] - b[1])) {
+          if (d[0] > lastEnd) {
+            picked.push(d)
+            lastEnd = d[1]
+          }
+        }
+        if (picked.length !== needY) continue
+
+        const covered = new Set<number>()
+        for (const [a, b] of picked) {
+          covered.add(a)
+          covered.add(b)
+        }
+        for (const i of unknown) {
+          if (covered.has(i)) continue
+          deduce(
+            ctx,
+            steps,
+            cells[i]!,
+            x,
+            `${lineLabel(line.kind, line.k)}还需 ${needY} 颗${colorName(y)}，${
+              picked.length
+            } 处互不重叠的成对空格已各需一颗，覆盖外的未定格只能是${colorName(x)}`,
+          )
+        }
+      }
+    }
+    return steps
+  },
+}
+
+/* ———————————————————— 规则 4：双空格与已完成行/列查重 ———————————————————— */
+
+/**
+ * 某行/列只剩两个空格时，它最终不能和任何一条**已完成**的同向行/列完全相同
+ * （任意两行/两列不得相同）。
+ *
+ * 若这两个空格在数量约束下是「一黑一白」（顺序未定），就可以拿已完成的行/列来卡：
+ * 找到一条除这两个空格外全都一致的，按它的填法就会撞车，于是只能反过来填。
+ *
+ * 只处理一黑一白的情形——两格同色已被半额锁定规则覆盖，不必重复推论。
+ */
+const twinLineRule: RuleMeta = {
+  id: 'twin-line',
+  name: '双空格查重',
+  fn: (ctx) => {
+    const steps: LogicStep[] = []
+    const shapes = allLines(ctx.puzzle).map((line) => {
+      const vals = line.cells.map((i) => ctx.cells[i] ?? CS.Unknown)
+      const unknown: number[] = []
+      vals.forEach((v, i) => {
+        if (v === CS.Unknown) unknown.push(i)
+      })
+      return { line, vals, unknown }
+    })
+
+    for (const s of shapes) {
+      if (s.unknown.length !== 2) continue
+      const n = s.vals.length
+      if (n % 2 !== 0) continue
+      const half = n / 2
+
+      let black = 0
+      let white = 0
+      for (const v of s.vals) {
+        if (v === CS.Black) black++
+        else if (v === CS.White) white++
+      }
+      // 只剩「一黑一白」没定顺序时才用得上查重；两格同色半额锁定已经覆盖
+      if (half - black !== 1 || half - white !== 1) continue
+
+      const p = s.unknown[0]!
+      const q = s.unknown[1]!
+      const label = lineLabel(s.line.kind, s.line.k)
+
+      for (const t of shapes) {
+        // 只和「同向且已完成」的行/列比（行与列相同是允许的，不能混比）
+        if (t.line.kind !== s.line.kind || t.unknown.length !== 0) continue
+
+        let twin = true
+        for (let i = 0; i < n; i++) {
+          if (i === p || i === q) continue
+          if (t.vals[i] !== s.vals[i]) {
+            twin = false
+            break
+          }
+        }
+        if (!twin) continue
+
+        const a = t.vals[p]!
+        const b = t.vals[q]!
+        // 已完成那条在这两格同色 → 一黑一白天然撞不上，没有信息
+        if (a === b) continue
+
+        const reason = `${label}第 ${p + 1}、${q + 1} 格未定（一黑一白），若填${colorName(
+          a,
+        )}${colorName(b)} 就会和已完成的第 ${t.line.k + 1} ${
+          s.line.kind === 'row' ? '行' : '列'
+        }完全相同，只能反过来填`
+        deduce(ctx, steps, s.line.cells[p]!, otherColor(a), reason)
+        deduce(ctx, steps, s.line.cells[q]!, otherColor(b), reason)
+      }
+    }
+    return steps
+  },
+}
+
+export const RULES: RuleMeta[] = [
+  pairEndsRule,
+  halfLockRule,
+  pairUrgencyRule,
+  twinLineRule,
+]
 
 export function planLogicSolve(puzzle: Puzzle, start?: CellState[]): LogicPlan {
   const t0 = Date.now()
