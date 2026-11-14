@@ -338,6 +338,43 @@ function allLines(puzzle) {
   }
   return out;
 }
+function lineShapes(ctx) {
+  return allLines(ctx.puzzle).map((line) => {
+    const vals = line.cells.map((i) => ctx.cells[i] ?? 0 /* Unknown */);
+    const unknown = [];
+    vals.forEach((v, i) => {
+      if (v === 0 /* Unknown */) unknown.push(i);
+    });
+    return { line, vals, unknown };
+  });
+}
+function combinationCount(n, k, cap = 1e6) {
+  if (k < 0 || k > n) return 0;
+  const kk = Math.min(k, n - k);
+  let c = 1;
+  for (let i = 0; i < kk; i++) {
+    c = c * (n - i) / (i + 1);
+    if (c > cap) return cap + 1;
+  }
+  return Math.round(c);
+}
+function forEachCombination(n, k, visit) {
+  if (k < 0 || k > n) return;
+  if (k === 0) {
+    visit([]);
+    return;
+  }
+  const pick = [];
+  for (let i = 0; i < k; i++) pick.push(i);
+  for (; ; ) {
+    if (!visit(pick)) return;
+    let i = k - 1;
+    while (i >= 0 && pick[i] === n - k + i) i--;
+    if (i < 0) return;
+    pick[i]++;
+    for (let j = i + 1; j < k; j++) pick[j] = pick[j - 1] + 1;
+  }
+}
 var pairEndsRule = {
   id: "pair-ends",
   name: "\u540C\u8272\u4E24\u7AEF / \u5939\u5FC3\u586B\u5F02\u8272",
@@ -498,14 +535,7 @@ var twinLineRule = {
   name: "\u53CC\u7A7A\u683C\u67E5\u91CD",
   fn: (ctx) => {
     const steps = [];
-    const shapes = allLines(ctx.puzzle).map((line) => {
-      const vals = line.cells.map((i) => ctx.cells[i] ?? 0 /* Unknown */);
-      const unknown = [];
-      vals.forEach((v, i) => {
-        if (v === 0 /* Unknown */) unknown.push(i);
-      });
-      return { line, vals, unknown };
-    });
+    const shapes = lineShapes(ctx);
     for (const s of shapes) {
       if (s.unknown.length !== 2) continue;
       const n = s.vals.length;
@@ -545,11 +575,166 @@ var twinLineRule = {
     return steps;
   }
 };
+var MAX_DUP_COMBOS = 4096;
+var dupForceRule = {
+  id: "dup-force",
+  name: "\u67E5\u91CD\u903C\u6B65",
+  fn: (ctx) => {
+    const steps = [];
+    const shapes = lineShapes(ctx);
+    for (const s of shapes) {
+      const k = s.unknown.length;
+      const n = s.vals.length;
+      if (!k || n % 2 !== 0) continue;
+      const half = n / 2;
+      let black = 0;
+      let white = 0;
+      for (const v of s.vals) {
+        if (v === 1 /* Black */) black++;
+        else if (v === 2 /* White */) white++;
+      }
+      const needB = half - black;
+      const needW = half - white;
+      if (needB < 0 || needW < 0 || needB + needW !== k) continue;
+      if (combinationCount(k, needB) > MAX_DUP_COMBOS) continue;
+      const targets = /* @__PURE__ */ new Set();
+      for (const t of shapes) {
+        if (t.line.kind !== s.line.kind || t.unknown.length) continue;
+        let match = true;
+        for (let i = 0; i < n; i++) {
+          if (s.vals[i] !== 0 /* Unknown */ && s.vals[i] !== t.vals[i]) {
+            match = false;
+            break;
+          }
+        }
+        if (!match) continue;
+        let mask = 0;
+        for (let j = 0; j < k; j++) {
+          if (t.vals[s.unknown[j]] === 1 /* Black */) mask |= 1 << j;
+        }
+        targets.add(mask);
+      }
+      if (!targets.size) continue;
+      const canBlack = new Array(k).fill(false);
+      const canWhite = new Array(k).fill(false);
+      let settled = 0;
+      let survivors = 0;
+      forEachCombination(k, needB, (pick) => {
+        let mask = 0;
+        for (const j of pick) mask |= 1 << j;
+        if (targets.has(mask)) return true;
+        survivors++;
+        for (let j = 0; j < k; j++) {
+          const isBlack = (mask & 1 << j) !== 0;
+          if (isBlack) {
+            if (!canBlack[j]) {
+              canBlack[j] = true;
+              if (canWhite[j]) settled++;
+            }
+          } else if (!canWhite[j]) {
+            canWhite[j] = true;
+            if (canBlack[j]) settled++;
+          }
+        }
+        return settled < k;
+      });
+      const label = lineLabel(s.line.kind, s.line.k);
+      const kindName = s.line.kind === "row" ? "\u884C" : "\u5217";
+      if (!survivors) {
+        const reason = `${label}\u65E0\u8BBA\u600E\u4E48\u8865\u90FD\u4F1A\u4E0E\u5DF2\u5B8C\u6210\u7684\u540C${kindName}\u91CD\u590D`;
+        if (!ctx.conflicts.includes(reason)) ctx.conflicts.push(reason);
+        continue;
+      }
+      for (let j = 0; j < k; j++) {
+        const at = s.unknown[j];
+        const index = s.line.cells[at];
+        const tail = `${label}\u9700\u8865 ${needB} \u9ED1 ${needW} \u767D\uFF0C\u5254\u9664\u4F1A\u4E0E\u5DF2\u5B8C\u6210${kindName}\u91CD\u590D\u7684\u8865\u6CD5\u540E`;
+        if (canBlack[j] && !canWhite[j]) {
+          deduce(ctx, steps, index, 1 /* Black */, `${tail}\uFF0C\u7B2C ${at + 1} \u683C\u53EA\u80FD\u586B\u9ED1`);
+        } else if (canWhite[j] && !canBlack[j]) {
+          deduce(ctx, steps, index, 2 /* White */, `${tail}\uFF0C\u7B2C ${at + 1} \u683C\u53EA\u80FD\u586B\u767D`);
+        }
+      }
+    }
+    return steps;
+  }
+};
+var HYPOTHESIS_BUDGET_MS = 900;
+var HYPOTHESIS_SEARCH = { maxNodes: 2e4, timeBudgetMs: 40 };
+var HYPOTHESIS_TRIES = 8;
+function propagate(puzzle, cells) {
+  const ctx = { puzzle, cells: cells.slice(), conflicts: [] };
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    let progressed = false;
+    for (const rule of RULES) {
+      if (rule.whenStalled) continue;
+      if (rule.fn(ctx).length) progressed = true;
+    }
+    if (!progressed || ctx.conflicts.length) break;
+  }
+  return ctx;
+}
+function isContradiction(puzzle, cells) {
+  const v = validate({ puzzleId: puzzle.id, size: puzzle.size, cells }, puzzle);
+  return v.triples.length > 0 || v.badRows.length > 0 || v.badCols.length > 0 || v.dupRows.length > 0 || v.dupCols.length > 0;
+}
+function refutedBy(puzzle, cells, index, value) {
+  const trial = cells.slice();
+  trial[index] = value;
+  const sub = propagate(puzzle, trial);
+  if (sub.conflicts.length || isContradiction(puzzle, sub.cells)) return true;
+  const r = countSolutions({ ...puzzle, givens: sub.cells }, 1, HYPOTHESIS_SEARCH);
+  return !r.timedOut && r.count === 0;
+}
+var hypothesisRule = {
+  id: "hypothesis",
+  name: "\u5047\u8BBE\u63A8\u6F14\u53CD\u8BC1",
+  whenStalled: true,
+  fn: (ctx) => {
+    const steps = [];
+    const deadline = ctx.deadline ?? Infinity;
+    if (Date.now() > deadline) return steps;
+    const n = ctx.puzzle.size;
+    const total = n * n;
+    if (ctx.cells.length !== total) return steps;
+    const rowBlank = new Array(n).fill(0);
+    const colBlank = new Array(n).fill(0);
+    const blanks = [];
+    for (let i = 0; i < total; i++) {
+      if (ctx.cells[i] !== 0 /* Unknown */) continue;
+      blanks.push(i);
+      rowBlank[Math.floor(i / n)]++;
+      colBlank[i % n]++;
+    }
+    if (!blanks.length) return steps;
+    blanks.sort((a, b) => {
+      const sa = rowBlank[Math.floor(a / n)] + colBlank[a % n];
+      const sb = rowBlank[Math.floor(b / n)] + colBlank[b % n];
+      return sa - sb;
+    });
+    let tries = 0;
+    for (const index of blanks) {
+      if (tries >= HYPOTHESIS_TRIES || Date.now() > deadline) break;
+      tries++;
+      if (refutedBy(ctx.puzzle, ctx.cells, index, 1 /* Black */)) {
+        deduce(ctx, steps, index, 2 /* White */, `\u5047\u8BBE\u7B2C ${index + 1} \u683C\u4E3A\u9ED1\u4F1A\u63A8\u51FA\u77DB\u76FE\uFF0C\u6545\u53EA\u80FD\u662F\u767D`);
+        break;
+      }
+      if (refutedBy(ctx.puzzle, ctx.cells, index, 2 /* White */)) {
+        deduce(ctx, steps, index, 1 /* Black */, `\u5047\u8BBE\u7B2C ${index + 1} \u683C\u4E3A\u767D\u4F1A\u63A8\u51FA\u77DB\u76FE\uFF0C\u6545\u53EA\u80FD\u662F\u9ED1`);
+        break;
+      }
+    }
+    return steps;
+  }
+};
 var RULES = [
   pairEndsRule,
   halfLockRule,
   pairUrgencyRule,
-  twinLineRule
+  twinLineRule,
+  dupForceRule,
+  hypothesisRule
 ];
 function planLogicSolve(puzzle, start) {
   const t0 = Date.now();
@@ -570,14 +755,32 @@ function planLogicSolve(puzzle, start) {
     const g = puzzle.givens[i];
     if (g !== 0 /* Unknown */) base[i] = g;
   }
-  const ctx = { puzzle, cells: base, conflicts: [] };
+  const ctx = {
+    puzzle,
+    cells: base,
+    conflicts: [],
+    deadline: Date.now() + HYPOTHESIS_BUDGET_MS
+  };
   const steps = [];
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const before = steps.length;
+    let progressed = false;
     for (const rule of RULES) {
-      for (const s of rule.fn(ctx)) steps.push(s);
+      if (rule.whenStalled) continue;
+      for (const s of rule.fn(ctx)) {
+        steps.push(s);
+        progressed = true;
+      }
     }
-    if (steps.length === before) break;
+    if (progressed) continue;
+    let advanced = false;
+    for (const rule of RULES) {
+      if (!rule.whenStalled) continue;
+      for (const s of rule.fn(ctx)) {
+        steps.push(s);
+        advanced = true;
+      }
+    }
+    if (!advanced) break;
   }
   return {
     supported: true,
