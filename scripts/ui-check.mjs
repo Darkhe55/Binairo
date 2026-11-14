@@ -447,6 +447,42 @@ try {
   await page.keyboard.press('ArrowUp')
   ok('边界处光标不越界', (await selCell()) === 0, `cursor=${await selCell()}`)
 
+  // 填满一整行后自动换到下一行行首（连续换行不卡住）
+  await page.keyboard.press('Home')
+  const wrapTrace = []
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press('1')
+    wrapTrace.push(await selCell())
+  }
+  ok('填满整行后自动换行',
+    wrapTrace[5] === 6 && wrapTrace[11] === 12,
+    `第0行末=${wrapTrace[5]} 第1行末=${wrapTrace[11]}`)
+
+  // 一路填到棋盘最后一格，末尾夹住不动
+  const tailTrace = []
+  for (let i = 0; i < 24; i++) {
+    await page.keyboard.press('1')
+    tailTrace.push(await selCell())
+  }
+  ok('棋盘末尾填完夹住不动', tailTrace[tailTrace.length - 1] === 35,
+    `末次=${tailTrace[tailTrace.length - 1]}`)
+
+  // 重开编辑器复位（清空格子、光标回首格），再验反向折行——否则 Home 会跳当前行
+  await page.click('#btn-custom')
+  await page.waitForTimeout(80)
+
+  // 反向：行首按 Backspace 折回上一行行尾
+  await page.keyboard.press('ArrowDown') // 第 1 行行首 (idx 6)
+  await page.keyboard.press('Backspace') // 折回 idx 5（第 0 行行尾）
+  ok('行首退格折回上一行行尾', (await selCell()) === 5, `cursor=${await selCell()}`)
+
+  // 方向键在行末仍夹住，不折行（与「前进」语义区分）
+  await page.keyboard.press('Home')
+  await page.keyboard.press('ArrowUp')
+  await page.keyboard.press('End')
+  await page.keyboard.press('ArrowRight')
+  ok('方向键行末仍夹住不折行', (await selCell()) === 5, `cursor=${await selCell()}`)
+
   // 全局快捷键隔离：编辑器开着时按 z/c/r 不应触发撤销/检查/抽题
   const puzzleBeforeKeys = await page.evaluate(() => window.__heibai.session.puzzle.id)
   await page.keyboard.press('z')
@@ -458,7 +494,8 @@ try {
     puzzleBeforeKeys === puzzleAfterKeys,
     `${puzzleBeforeKeys} → ${puzzleAfterKeys}`)
 
-  // 键盘摆的格能真的载入并保存
+  // 键盘摆的格能真的载入并保存（编辑器刚被重置，先摆一格给定）
+  await page.keyboard.press('1')
   await page.click('#custom-apply')
   await page.waitForTimeout(100)
   const kbdLoadedSize = await page.evaluate(() => window.__heibai.session.puzzle.size)

@@ -118,7 +118,7 @@ app.innerHTML = `
           <label>边长 <input id="custom-n" type="number" min="4" max="40" step="2" value="6" /></label>
           <button class="btn" id="custom-regen" type="button">生成网格</button>
         </div>
-        <div class="custom-hint">点击格子循环：空 → 黑 → 白 → 空，摆好给定格后「载入题板」。｜ 键盘：方向键移动 · 1 填黑 · 2 填白 · . / 退格清空 · Enter / Tab 下一格 · Home / End 行首行尾</div>
+        <div class="custom-hint">点击格子循环：空 → 黑 → 白 → 空，摆好给定格后「载入题板」。｜ 键盘：方向键移动 · 1 填黑 · 2 填白 · . / 退格清空 · Enter / Tab 下一格（填满一行自动换行）· Home / End 行首行尾</div>
         <div class="custom-grid" id="custom-grid"></div>
         <div class="toolbar" style="margin-top:10px">
           <button class="btn primary" id="custom-apply" type="button">载入题板</button>
@@ -889,6 +889,28 @@ function customCursorToEdge(edge: 'home' | 'end'): void {
   btn?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
 }
 
+/** 把光标滚进可视区（大题板下换行后不会跑出视野） */
+function scrollCursorIntoView(): void {
+  const btn = document.querySelector<HTMLButtonElement>(
+    `.custom-cell[data-i="${customCursor}"]`,
+  )
+  btn?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}
+
+/**
+ * 行优先地前进/后退一格：索引 ±1 并在 [0, 总数-1] 夹住，
+ * 于是行末自然折到下一行行首、上一行行尾折回来，棋盘两端夹住不动。
+ * 填色、清空、Enter/Tab 都走这里，填满一行后自动换行。
+ */
+function customAdvance(step: 1 | -1): void {
+  const total = customN * customN
+  if (total <= 0) return
+  const from = customCursor < 0 ? 0 : customCursor
+  customCursor = Math.min(Math.max(from + step, 0), total - 1)
+  renderCustomGrid()
+  scrollCursorIntoView()
+}
+
 /** 自定义题板的键盘处理：编辑器开着时才吃这些键，避免和全局快捷键打架 */
 function customEditorKeydown(e: KeyboardEvent): boolean {
   if ($('#custom-editor').hidden) return false
@@ -897,24 +919,23 @@ function customEditorKeydown(e: KeyboardEvent): boolean {
   if (target && target.tagName === 'INPUT') return false
 
   const k = e.key
-  // 1 = 黑，2 = 白（填完自动右移一格）
+  // 1 = 黑，2 = 白（填完自动前进一格，行末则折到下一行行首）
   if (k === '1' || k === '2') {
     e.preventDefault()
     const value = k === '1' ? CS.Black : CS.White
     if (customCursor < 0) customCursor = 0
     customGivens[customCursor] = value
     renderCustomGrid()
-    customMoveCursor(1, 0)
+    customAdvance(1)
     return true
   }
-  // 清空：. / 退格 / Delete / 空格（退格填完左移，其余右移）
+  // 清空：. / 退格 / Delete / 空格（退格回退一格，其余前进一格）
   if (k === '.' || k === 'Backspace' || k === 'Delete' || k === ' ') {
     e.preventDefault()
     if (customCursor < 0) customCursor = 0
     customGivens[customCursor] = CS.Unknown
     renderCustomGrid()
-    if (k === 'Backspace') customMoveCursor(-1, 0)
-    else customMoveCursor(1, 0)
+    customAdvance(k === 'Backspace' ? -1 : 1)
     return true
   }
   if (k === 'ArrowLeft') {
@@ -937,11 +958,10 @@ function customEditorKeydown(e: KeyboardEvent): boolean {
     customMoveCursor(0, 1)
     return true
   }
-  // Enter / Tab 下一格，Shift 反向
+  // Enter / Tab 下一格（行末折到下一行行首），Shift 反向
   if (k === 'Enter' || k === 'Tab') {
     e.preventDefault()
-    if (e.shiftKey) customMoveCursor(-1, 0)
-    else customMoveCursor(1, 0)
+    customAdvance(e.shiftKey ? -1 : 1)
     return true
   }
   if (k === 'Home') {
@@ -980,7 +1000,7 @@ function openCustomEditor(): void {
   customGivens = new Array<CellState>(customN * customN).fill(CS.Unknown)
   customCursor = 0
   renderCustomGrid()
-  customMsg('点击格子循环：空 → 黑 → 白 → 空；也可用键盘：方向键移动 · 1 填黑 · 2 填白 · . 清空。')
+  customMsg('点击格子循环：空 → 黑 → 白 → 空；也可用键盘：方向键移动 · 1 填黑 · 2 填白 · . 清空（填满一行自动换到下一行）。')
   $('#custom-grid').focus()
 }
 
