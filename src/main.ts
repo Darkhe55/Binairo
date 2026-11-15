@@ -174,6 +174,9 @@ let library: Puzzle[] = [...puzzles, ...loadSavedPuzzles()]
 
 /** 正在等待第二次点击确认删除的题板 id（两步确认，防误删） */
 let pendingDeleteId: string | null = null
+/** 正在编辑的已保存题板；null = 新建 */
+let editingId: string | null = null
+let editingName: string | null = null
 
 /* ———————————————————— 刷新 ———————————————————— */
 
@@ -188,11 +191,12 @@ function renderPuzzleList() {
   list.innerHTML = library
     .map((p) => {
       const active = session?.puzzle.id === p.id ? ' active' : ''
-      // 只有本地保存的自定义题板能删，内置题不给删
+      // 只有本地保存的自定义题板能编辑 / 删除，内置题不给改
       const confirming = pendingDeleteId === p.id
-      const del =
+      const actions =
         p.difficulty === 'custom'
-          ? `<button class="puzzle-del${confirming ? ' confirm' : ''}" data-del="${p.id}" type="button" title="${
+          ? `<button class="puzzle-edit" data-edit="${p.id}" type="button" title="编辑题面">编辑</button>` +
+            `<button class="puzzle-del${confirming ? ' confirm' : ''}" data-del="${p.id}" type="button" title="${
               confirming ? '再点一次确认删除' : '从题库删除'
             }">${confirming ? '确认' : '×'}</button>`
           : ''
@@ -202,7 +206,7 @@ function renderPuzzleList() {
             <span class="title">${p.name}</span>
             <span class="meta">${p.width}×${p.height} · ${difficultyLabel(p.difficulty)} · ${givenCount(p)} 个给定格</span>
           </button>
-          ${del}
+          ${actions}
         </div>
       `
     })
@@ -228,7 +232,24 @@ function renderPuzzleList() {
       }
     })
   })
+
+  // 编辑：把已保存的给定格读回自定义题板
+  list.querySelectorAll<HTMLButtonElement>('[data-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.edit
+      if (id) editSavedPuzzle(id)
+    })
+  })
 }
+
+// 删除确认态：点其它位置自动取消
+document.addEventListener('click', (e) => {
+  if (!pendingDeleteId) return
+  const target = e.target as Element | null
+  if (target?.closest('[data-del]')) return
+  pendingDeleteId = null
+  renderPuzzleList()
+})
 
 function currentSvg(): SVGSVGElement | null {
   return $('#board').querySelector<SVGSVGElement>('svg.board-svg')
@@ -1004,6 +1025,8 @@ function regenCustomGrid(): void {
 }
 
 function openCustomEditor(): void {
+  editingId = null
+  editingName = null
   $('#custom-editor').hidden = false
   readCustomSize()
   customGivens = new Array<CellState>(customW * customH).fill(CS.Unknown)
@@ -1020,14 +1043,36 @@ function closeCustomEditor(): void {
 
 function customPuzzle(): Puzzle {
   return {
-    // 同一张题板恒定同一个 id：重复保存是覆盖，刷新后也不会变
-    id: `custom-${customW}x${customH}-${customPuzzleId(customGivens)}`,
-    name: `自定义 ${customW}×${customH}`,
+    // 新建时同一张题板恒定同一个 id：重复保存是覆盖，刷新后也不会变；
+    // 编辑时沿用原 id，保存即覆盖原题。
+    id: editingId ?? `custom-${customW}x${customH}-${customPuzzleId(customGivens)}`,
+    name: editingName ?? `自定义 ${customW}×${customH}`,
     width: customW,
     height: customH,
     givens: customGivens.slice(),
     difficulty: 'custom',
   }
+}
+
+/** 把已保存的自定义题读回编辑器；保存时覆盖原题 */
+function editSavedPuzzle(id: string): void {
+  const p = library.find((x) => x.id === id)
+  if (!p || p.difficulty !== 'custom') return
+  editingId = p.id
+  editingName = p.name
+  customW = p.width
+  customH = p.height
+  customGivens = p.givens.slice()
+  customCursor = 0
+  const wEl = document.getElementById('custom-w') as HTMLInputElement | null
+  const hEl = document.getElementById('custom-h') as HTMLInputElement | null
+  if (wEl) wEl.value = String(customW)
+  if (hEl) hEl.value = String(customH)
+  $('#custom-editor').hidden = false
+  renderCustomGrid()
+  customMsg(`正在编辑「${p.name}」。保存会覆盖原题。`, 'ok')
+  $('#custom-editor').scrollIntoView({ block: 'nearest' })
+  $('#custom-grid').focus()
 }
 
 function stampLabel(): string {
@@ -1043,13 +1088,16 @@ function saveCustomPuzzle(): void {
     customMsg('至少放一个给定格。', 'bad')
     return
   }
+  const isEditing = !!editingId
   const base = customPuzzle()
-  const name = `自定义 ${base.width}×${base.height} · ${stampLabel()}`
+  const name = editingName ?? `自定义 ${base.width}×${base.height} · ${stampLabel()}`
   const saved = savePuzzleToLibrary({ ...base, name })
   library = [...puzzles, ...saved]
+  editingId = base.id
+  editingName = name
   renderPuzzleList()
-  customMsg(`已保存到题库：「${name}」，刷新页面后仍在。`, 'ok')
-  setStatus(`自定义题板已存入题库（现有 ${saved.length} 张自定义题）。`)
+  customMsg(`已${isEditing ? '更新' : '保存'}到题库：「${name}」，刷新页面后仍在。`, 'ok')
+  setStatus(`自定义题板已${isEditing ? '更新' : '存入'}题库（现有 ${saved.length} 张自定义题）。`)
 }
 
 /** 从本地题库删除一张自定义题板；删的正是当前题时自动切到题库第一题 */
@@ -1063,6 +1111,10 @@ function deleteSavedPuzzle(id: string): void {
   const saved = removeSavedPuzzle(id)
   library = [...puzzles, ...saved]
   pendingDeleteId = null
+  if (editingId === id) {
+    editingId = null
+    editingName = null
+  }
   // 删的是当前题：切到题库第一题，别留一个不在列表里的活跃项
   if (session && session.puzzle.id === id && library[0]) selectPuzzle(library[0])
   else renderPuzzleList()
@@ -1087,6 +1139,8 @@ function loadCustomPuzzle(): void {
   }
   const puzzle = customPuzzle()
   selectPuzzle(puzzle)
+  editingId = puzzle.id
+  editingName = puzzle.name
   // 题板故意不收起：只有点「关闭」才关，方便载入后接着改
   customMsg(`已载入「${puzzle.name}」。题板保持打开，可继续修改。`, 'ok')
 }
@@ -1145,6 +1199,13 @@ window.addEventListener('keydown', (e) => {
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
   // 自定义题板开着时，键盘先归题板用，别让全局快捷键（Z/C/R 等）抢走
   if (customEditorKeydown(e)) return
+  // 删除确认态：Esc 取消
+  if (e.key === 'Escape' && pendingDeleteId) {
+    e.preventDefault()
+    pendingDeleteId = null
+    renderPuzzleList()
+    return
+  }
   const k = e.key.toLowerCase()
   if (k === 'z' && !e.shiftKey) {
     e.preventDefault()

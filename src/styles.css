@@ -155,18 +155,25 @@ body {
   min-width: 0;
 }
 
-.puzzle-del {
+.puzzle-del,
+.puzzle-edit {
   appearance: none;
   flex: none;
-  width: 38px;
+  min-width: 38px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fbf8f1;
   color: var(--ink-soft);
-  font-size: 15px;
-  line-height: 1;
+  font-size: 13px;
+  line-height: 1.6;
   cursor: pointer;
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.puzzle-edit:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 .puzzle-del:hover {
