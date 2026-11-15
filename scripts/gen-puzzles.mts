@@ -36,7 +36,8 @@ function shuffled<T>(arr: T[], rng: () => number): T[] {
 const emptyPuzzle = (size: number, givens: CellState[]): Puzzle => ({
   id: 'gen',
   name: 'gen',
-  size,
+  width: size,
+  height: size,
   givens,
   difficulty: 'custom',
 })

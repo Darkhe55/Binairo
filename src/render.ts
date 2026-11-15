@@ -8,7 +8,8 @@ export const BASE_CELL = 48
 export interface BoardMetrics {
   cell: number
   pad: number
-  size: number
+  width: number
+  height: number
   svgWidth: number
   svgHeight: number
   k: number
@@ -20,9 +21,10 @@ export function metricsFor(puzzle: Puzzle): BoardMetrics {
   return {
     cell,
     pad,
-    size: puzzle.size,
-    svgWidth: pad * 2 + puzzle.size * cell,
-    svgHeight: pad * 2 + puzzle.size * cell,
+    width: puzzle.width,
+    height: puzzle.height,
+    svgWidth: pad * 2 + puzzle.width * cell,
+    svgHeight: pad * 2 + puzzle.height * cell,
     k: cell / BASE_CELL,
   }
 }
@@ -50,8 +52,8 @@ export function clientToViewBox(svg: SVGSVGElement, clientX: number, clientY: nu
 export function hitTestCell(m: BoardMetrics, puzzle: Puzzle, x: number, y: number): number | null {
   const cx = Math.floor((x - m.pad) / m.cell)
   const cy = Math.floor((y - m.pad) / m.cell)
-  if (cx < 0 || cy < 0 || cx >= puzzle.size || cy >= puzzle.size) return null
-  return idx(puzzle.size, cx, cy)
+  if (cx < 0 || cy < 0 || cx >= puzzle.width || cy >= puzzle.height) return null
+  return idx(puzzle.width, cx, cy)
 }
 
 function discMarkup(
@@ -77,7 +79,8 @@ export function renderBoard(
   result: ValidationResult,
 ): string {
   const m = metricsFor(puzzle)
-  const n = puzzle.size
+  const w = puzzle.width
+  const h = puzzle.height
 
   const tripleSet = new Set(result.tripleCells)
   const badRowSet = new Set(result.badRows)
@@ -91,10 +94,10 @@ export function renderBoard(
   )
 
   // 格子底 + 题面格淡色
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
       const { x: px, y: py } = cellXY(m, x, y)
-      const i = idx(n, x, y)
+      const i = idx(w, x, y)
       const given = puzzle.givens[i] !== CS.Unknown
       const cls = given ? 'cell given' : 'cell'
       parts.push(
@@ -104,23 +107,23 @@ export function renderBoard(
   }
 
   // 行/列异常淡红底
-  const tint = (x0: number, y0: number, w: number, h: number) =>
-    `<rect class="line-error" x="${x0.toFixed(2)}" y="${y0.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" />`
+  const tint = (x0: number, y0: number, tw: number, th: number) =>
+    `<rect class="line-error" x="${x0.toFixed(2)}" y="${y0.toFixed(2)}" width="${tw.toFixed(2)}" height="${th.toFixed(2)}" />`
   for (const y of badRowSet) {
     const { x, y: py } = cellXY(m, 0, y)
-    parts.push(tint(x, py, n * m.cell, m.cell))
+    parts.push(tint(x, py, w * m.cell, m.cell))
   }
   for (const y of dupRowSet) {
     const { x, y: py } = cellXY(m, 0, y)
-    parts.push(tint(x, py, n * m.cell, m.cell))
+    parts.push(tint(x, py, w * m.cell, m.cell))
   }
   for (const x of badColSet) {
     const { x: px, y } = cellXY(m, x, 0)
-    parts.push(tint(px, y, m.cell, n * m.cell))
+    parts.push(tint(px, y, m.cell, h * m.cell))
   }
   for (const x of dupColSet) {
     const { x: px, y } = cellXY(m, x, 0)
-    parts.push(tint(px, y, m.cell, n * m.cell))
+    parts.push(tint(px, y, m.cell, h * m.cell))
   }
 
   // 悬停层 / 演示层
@@ -128,9 +131,9 @@ export function renderBoard(
   parts.push('<g class="flash-layer"></g>')
 
   // 棋子
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
-      const i = idx(n, x, y)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = idx(w, x, y)
       const given = puzzle.givens[i]
       const v = given !== CS.Unknown ? given : cellValue(state, i)
       if (v === CS.Unknown) continue
@@ -153,8 +156,8 @@ export function renderBoard(
 
 export function hoverMarkup(m: BoardMetrics, cell: number | null): string {
   if (cell === null) return ''
-  const x = cell % m.size
-  const y = Math.floor(cell / m.size)
+  const x = cell % m.width
+  const y = Math.floor(cell / m.width)
   const { x: px, y: py } = cellXY(m, x, y)
   const inset = 1.5 * m.k
   return `<rect class="cell-hover" x="${(px + inset).toFixed(2)}" y="${(py + inset).toFixed(2)}" width="${(m.cell - inset * 2).toFixed(2)}" height="${(m.cell - inset * 2).toFixed(2)}" rx="${6 * m.k}" />`
@@ -168,8 +171,8 @@ export function updateHover(svg: SVGSVGElement, m: BoardMetrics, cell: number | 
 
 export function flashMarkup(m: BoardMetrics, cell: number | null): string {
   if (cell === null) return ''
-  const x = cell % m.size
-  const y = Math.floor(cell / m.size)
+  const x = cell % m.width
+  const y = Math.floor(cell / m.width)
   const { x: px, y: py } = cellXY(m, x, y)
   const inset = 1 * m.k
   return `<rect class="cell-flash" x="${(px + inset).toFixed(2)}" y="${(py + inset).toFixed(2)}" width="${(m.cell - inset * 2).toFixed(2)}" height="${(m.cell - inset * 2).toFixed(2)}" rx="${6 * m.k}" />`

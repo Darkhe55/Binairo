@@ -29,8 +29,10 @@ function sameLine(a: CellState[], b: CellState[]): boolean {
 }
 
 export function validate(state: GameState, puzzle: Puzzle): ValidationResult {
-  const s = puzzle.size
-  const half = s / 2
+  const w = puzzle.width
+  const h = puzzle.height
+  const halfRow = w / 2
+  const halfCol = h / 2
 
   const triples: string[] = []
   const tripleCells: number[] = []
@@ -43,36 +45,36 @@ export function validate(state: GameState, puzzle: Puzzle): ValidationResult {
   const rows: CellState[][] = []
   const cols: CellState[][] = []
 
-  for (let y = 0; y < s; y++) {
+  for (let y = 0; y < h; y++) {
     const row = rowOf(state, y)
     rows.push(row)
     const t = findTriple(row)
     if (t >= 0) {
       triples.push(`第 ${y + 1} 行`)
-      for (let i = t; i < t + 3; i++) tripleCells.push(idx(s, i, y))
+      for (let i = t; i < t + 3; i++) tripleCells.push(idx(w, i, y))
     }
     const black = countColor(row, CS.Black)
     const white = countColor(row, CS.White)
-    if (black > half || white > half) badRows.push(y)
+    if (black > halfRow || white > halfRow) badRows.push(y)
   }
 
-  for (let x = 0; x < s; x++) {
+  for (let x = 0; x < w; x++) {
     const col = colOf(state, x)
     cols.push(col)
     const t = findTriple(col)
     if (t >= 0) {
       triples.push(`第 ${x + 1} 列`)
-      for (let i = t; i < t + 3; i++) tripleCells.push(idx(s, x, i))
+      for (let i = t; i < t + 3; i++) tripleCells.push(idx(w, x, i))
     }
     const black = countColor(col, CS.Black)
     const white = countColor(col, CS.White)
-    if (black > half || white > half) badCols.push(x)
+    if (black > halfCol || white > halfCol) badCols.push(x)
   }
 
   // 行列重复（只在该行/列已填满时才算）
-  for (let y = 0; y < s; y++) {
+  for (let y = 0; y < h; y++) {
     if (rows[y]!.some((v) => v === CS.Unknown)) continue
-    for (let y2 = y + 1; y2 < s; y2++) {
+    for (let y2 = y + 1; y2 < h; y2++) {
       if (rows[y2]!.some((v) => v === CS.Unknown)) continue
       if (sameLine(rows[y]!, rows[y2]!)) {
         if (!dupRows.includes(y)) dupRows.push(y)
@@ -80,9 +82,9 @@ export function validate(state: GameState, puzzle: Puzzle): ValidationResult {
       }
     }
   }
-  for (let x = 0; x < s; x++) {
+  for (let x = 0; x < w; x++) {
     if (cols[x]!.some((v) => v === CS.Unknown)) continue
-    for (let x2 = x + 1; x2 < s; x2++) {
+    for (let x2 = x + 1; x2 < w; x2++) {
       if (cols[x2]!.some((v) => v === CS.Unknown)) continue
       if (sameLine(cols[x]!, cols[x2]!)) {
         if (!dupCols.includes(x)) dupCols.push(x)
@@ -95,7 +97,7 @@ export function validate(state: GameState, puzzle: Puzzle): ValidationResult {
     if (state.cells[i] !== CS.Unknown) filled++
   }
 
-  const unknown = s * s - filled
+  const unknown = w * h - filled
   const solved =
     unknown === 0 &&
     triples.length === 0 &&
@@ -108,24 +110,38 @@ export function validate(state: GameState, puzzle: Puzzle): ValidationResult {
 }
 
 /** 某格填某个颜色是否会立刻造成三连（供逻辑解谜器用） */
-export function wouldTriple(state: GameState, size: number, index: number, value: CellState): boolean {
-  const x = index % size
-  const y = Math.floor(index / size)
+export function wouldTriple(
+  state: GameState,
+  width: number,
+  height: number,
+  index: number,
+  value: CellState,
+): boolean {
+  const x = index % width
+  const y = Math.floor(index / width)
   // 横向
   const row = rowOf(state, y)
   row[x] = value
   if (findTriple(row) >= 0) return true
   // 纵向
   const col = colOf(state, x)
-  col[y] = value
+  if (y < height) col[y] = value
   if (findTriple(col) >= 0) return true
   return false
 }
 
 /** 某行/列的黑（或白）是否已经到上限 */
-export function colorFull(state: GameState, size: number, line: 'row' | 'col', at: number, value: CellState): boolean {
+export function colorFull(
+  state: GameState,
+  width: number,
+  height: number,
+  line: 'row' | 'col',
+  at: number,
+  value: CellState,
+): boolean {
   const cells = line === 'row' ? rowOf(state, at) : colOf(state, at)
-  return countColor(cells, value) >= size / 2
+  const limit = line === 'row' ? width / 2 : height / 2
+  return countColor(cells, value) >= limit
 }
 
 export { cellValue, idx }

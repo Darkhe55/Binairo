@@ -28,13 +28,13 @@ const failIf = (cond: boolean, msg: string) => {
 console.log(`共 ${puzzles.length} 道题\n`)
 
 for (const p of puzzles) {
-  const total = p.size * p.size
-  console.log(`${p.id}  ${p.size}×${p.size}  ${p.difficulty}`)
+  const total = p.width * p.height
+  console.log(`${p.id}  ${p.width}×${p.height}  ${p.difficulty}`)
 
   let bad = false
   bad ||= failIf(p.givens.length !== total, `givens 长度 ${p.givens.length} ≠ ${total}`)
   bad ||= failIf(!p.solution || p.solution.length !== total, 'solution 长度不对')
-  bad ||= failIf(p.size % 2 !== 0, `尺寸 ${p.size} 不是偶数`)
+  bad ||= failIf(p.width % 2 !== 0 || p.height % 2 !== 0, `尺寸 ${p.width}×${p.height} 不是偶数`)
   if (bad) continue
 
   // 题面不能和参考解冲突
@@ -94,7 +94,7 @@ for (const p of puzzles) {
 
   if (plan.complete) solvedByLogic++
   console.log(
-    `  ✓ ${p.id} 仅凭题面推出 ${plan.steps.length}/${p.size * p.size} 格${
+    `  ✓ ${p.id} 仅凭题面推出 ${plan.steps.length}/${p.width * p.height} 格${
       plan.complete ? '（已全部解出）' : ''
     }`,
   )

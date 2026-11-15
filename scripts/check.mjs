@@ -15,7 +15,8 @@ function toPuzzle(r) {
   return {
     id: r.id,
     name: r.name,
-    size: r.size,
+    width: r.size,
+    height: r.size,
     difficulty: r.difficulty,
     givens: parseCells(r.givens),
     solution: parseCells(r.solution)
@@ -24,31 +25,34 @@ function toPuzzle(r) {
 var puzzles = RAW_PUZZLES.map(toPuzzle);
 
 // src/state.ts
-function idx(size, x, y) {
-  return y * size + x;
+function idx(width, x, y) {
+  return y * width + x;
 }
 function createEmptyState(puzzle) {
   return {
     puzzleId: puzzle.id,
-    size: puzzle.size,
-    cells: new Array(puzzle.size * puzzle.size).fill(0 /* Unknown */)
+    width: puzzle.width,
+    height: puzzle.height,
+    cells: new Array(puzzle.width * puzzle.height).fill(0 /* Unknown */)
   };
 }
 function rowOf(state, y) {
-  const s = state.size;
-  return state.cells.slice(y * s, y * s + s);
+  const w = state.width;
+  return state.cells.slice(y * w, y * w + w);
 }
 function colOf(state, x) {
-  const s = state.size;
+  const w = state.width;
+  const h = state.height;
   const out = [];
-  for (let y = 0; y < s; y++) out.push(state.cells[y * s + x]);
+  for (let y = 0; y < h; y++) out.push(state.cells[y * w + x]);
   return out;
 }
 
 // src/solver.ts
 var COLORS = [1 /* Black */, 2 /* White */];
 var Searcher = class {
-  size;
+  width;
+  height;
   puzzle;
   cells;
   blackInRow;
@@ -66,15 +70,16 @@ var Searcher = class {
   nodes = 0;
   timedOut = false;
   constructor(puzzle, opts = {}) {
-    this.size = puzzle.size;
+    this.width = puzzle.width;
+    this.height = puzzle.height;
     this.puzzle = puzzle;
-    this.cells = new Array(this.size * this.size).fill(0 /* Unknown */);
-    this.blackInRow = new Int32Array(this.size);
-    this.whiteInRow = new Int32Array(this.size);
-    this.blackInCol = new Int32Array(this.size);
-    this.whiteInCol = new Int32Array(this.size);
-    this.freeInRow = new Int32Array(this.size).fill(this.size);
-    this.freeInCol = new Int32Array(this.size).fill(this.size);
+    this.cells = new Array(this.width * this.height).fill(0 /* Unknown */);
+    this.blackInRow = new Int32Array(this.height);
+    this.whiteInRow = new Int32Array(this.height);
+    this.blackInCol = new Int32Array(this.width);
+    this.whiteInCol = new Int32Array(this.width);
+    this.freeInRow = new Int32Array(this.height).fill(this.width);
+    this.freeInCol = new Int32Array(this.width).fill(this.height);
     for (let i = 0; i < puzzle.givens.length; i++) {
       const g = puzzle.givens[i];
       if (g === 0 /* Unknown */) continue;
@@ -84,16 +89,16 @@ var Searcher = class {
     this.maxNodes = opts.maxNodes ?? 4e5;
     this.deadline = opts.timeBudgetMs ? Date.now() + opts.timeBudgetMs : 0;
     this.rng = opts.rng;
-    for (let y = 0; y < this.size; y++) {
+    for (let y = 0; y < this.height; y++) {
       if (this.freeInRow[y] === 0) this.fullRows.push(rowOf(this.asState(), y));
     }
-    for (let x = 0; x < this.size; x++) {
+    for (let x = 0; x < this.width; x++) {
       if (this.freeInCol[x] === 0) this.fullCols.push(colOf(this.asState(), x));
     }
   }
   book(index, value, sign) {
-    const x = index % this.size;
-    const y = Math.floor(index / this.size);
+    const x = index % this.width;
+    const y = Math.floor(index / this.width);
     this.freeInRow[y] -= sign;
     this.freeInCol[x] -= sign;
     if (value === 1 /* Black */) {
@@ -117,9 +122,10 @@ var Searcher = class {
   }
   /** 落子后是否仍自洽 */
   okAfter(index, value) {
-    const x = index % this.size;
-    const y = Math.floor(index / this.size);
-    const half = this.size / 2;
+    const x = index % this.width;
+    const y = Math.floor(index / this.width);
+    const halfRow = this.width / 2;
+    const halfCol = this.height / 2;
     const row = rowOf(this.asState(), y);
     const col = colOf(this.asState(), x);
     const checkLine = (line, at) => {
@@ -134,16 +140,21 @@ var Searcher = class {
     if (!checkLine(col, y)) return false;
     const black = value === 1 /* Black */ ? this.blackInRow[y] : this.whiteInRow[y];
     const white = value === 2 /* White */ ? this.whiteInRow[y] : this.blackInRow[y];
-    if (black > half || white > half) return false;
-    if (black + this.freeInRow[y] < half) return false;
+    if (black > halfRow || white > halfRow) return false;
+    if (black + this.freeInRow[y] < halfRow) return false;
     const blackC = value === 1 /* Black */ ? this.blackInCol[x] : this.whiteInCol[x];
     const whiteC = value === 2 /* White */ ? this.whiteInCol[x] : this.blackInCol[x];
-    if (blackC > half || whiteC > half) return false;
-    if (blackC + this.freeInCol[x] < half) return false;
+    if (blackC > halfCol || whiteC > halfCol) return false;
+    if (blackC + this.freeInCol[x] < halfCol) return false;
     return true;
   }
   asState() {
-    return { puzzleId: this.puzzle.id, size: this.size, cells: this.cells };
+    return {
+      puzzleId: this.puzzle.id,
+      width: this.width,
+      height: this.height,
+      cells: this.cells
+    };
   }
   /** 行/列刚被填满时，查是否与已登记的行/列重复 */
   duplicateCheck(x, y) {
@@ -158,7 +169,7 @@ var Searcher = class {
     return true;
   }
   search(onFound) {
-    const total = this.size * this.size;
+    const total = this.width * this.height;
     const order = [];
     for (let i = 0; i < total; i++) if (this.cells[i] === 0 /* Unknown */) order.push(i);
     const dfs = (k) => {
@@ -166,13 +177,15 @@ var Searcher = class {
       this.nodes++;
       if (!this.checkBudget()) return true;
       const i = order[k];
-      const x = i % this.size;
-      const y = Math.floor(i / this.size);
+      const x = i % this.width;
+      const y = Math.floor(i / this.width);
       const colors = this.rng ? this.rng() < 0.5 ? [1 /* Black */, 2 /* White */] : [2 /* White */, 1 /* Black */] : COLORS;
       for (const v of colors) {
         this.cells[i] = v;
         this.book(i, v, 1);
-        const okCounts = (v === 1 /* Black */ ? this.blackInRow[y] : this.whiteInRow[y]) <= this.size / 2 && (v === 1 /* Black */ ? this.blackInCol[x] : this.whiteInCol[x]) <= this.size / 2;
+        const halfRow = this.width / 2;
+        const halfCol = this.height / 2;
+        const okCounts = (v === 1 /* Black */ ? this.blackInRow[y] : this.whiteInRow[y]) <= halfRow && (v === 1 /* Black */ ? this.blackInCol[x] : this.whiteInCol[x]) <= halfCol;
         const rowJustFilled = this.freeInRow[y] === 0;
         const colJustFilled = this.freeInCol[x] === 0;
         const dupOk = okCounts && this.duplicateCheck(x, y);
@@ -240,8 +253,10 @@ function sameLine2(a, b) {
   return true;
 }
 function validate(state, puzzle) {
-  const s = puzzle.size;
-  const half = s / 2;
+  const w = puzzle.width;
+  const h = puzzle.height;
+  const halfRow = w / 2;
+  const halfCol = h / 2;
   const triples = [];
   const tripleCells = [];
   const badRows = [];
@@ -251,33 +266,33 @@ function validate(state, puzzle) {
   let filled = 0;
   const rows = [];
   const cols = [];
-  for (let y = 0; y < s; y++) {
+  for (let y = 0; y < h; y++) {
     const row = rowOf(state, y);
     rows.push(row);
     const t = findTriple(row);
     if (t >= 0) {
       triples.push(`\u7B2C ${y + 1} \u884C`);
-      for (let i = t; i < t + 3; i++) tripleCells.push(idx(s, i, y));
+      for (let i = t; i < t + 3; i++) tripleCells.push(idx(w, i, y));
     }
     const black = countColor(row, 1 /* Black */);
     const white = countColor(row, 2 /* White */);
-    if (black > half || white > half) badRows.push(y);
+    if (black > halfRow || white > halfRow) badRows.push(y);
   }
-  for (let x = 0; x < s; x++) {
+  for (let x = 0; x < w; x++) {
     const col = colOf(state, x);
     cols.push(col);
     const t = findTriple(col);
     if (t >= 0) {
       triples.push(`\u7B2C ${x + 1} \u5217`);
-      for (let i = t; i < t + 3; i++) tripleCells.push(idx(s, x, i));
+      for (let i = t; i < t + 3; i++) tripleCells.push(idx(w, x, i));
     }
     const black = countColor(col, 1 /* Black */);
     const white = countColor(col, 2 /* White */);
-    if (black > half || white > half) badCols.push(x);
+    if (black > halfCol || white > halfCol) badCols.push(x);
   }
-  for (let y = 0; y < s; y++) {
+  for (let y = 0; y < h; y++) {
     if (rows[y].some((v) => v === 0 /* Unknown */)) continue;
-    for (let y2 = y + 1; y2 < s; y2++) {
+    for (let y2 = y + 1; y2 < h; y2++) {
       if (rows[y2].some((v) => v === 0 /* Unknown */)) continue;
       if (sameLine2(rows[y], rows[y2])) {
         if (!dupRows.includes(y)) dupRows.push(y);
@@ -285,9 +300,9 @@ function validate(state, puzzle) {
       }
     }
   }
-  for (let x = 0; x < s; x++) {
+  for (let x = 0; x < w; x++) {
     if (cols[x].some((v) => v === 0 /* Unknown */)) continue;
-    for (let x2 = x + 1; x2 < s; x2++) {
+    for (let x2 = x + 1; x2 < w; x2++) {
       if (cols[x2].some((v) => v === 0 /* Unknown */)) continue;
       if (sameLine2(cols[x], cols[x2])) {
         if (!dupCols.includes(x)) dupCols.push(x);
@@ -298,7 +313,7 @@ function validate(state, puzzle) {
   for (let i = 0; i < state.cells.length; i++) {
     if (state.cells[i] !== 0 /* Unknown */) filled++;
   }
-  const unknown = s * s - filled;
+  const unknown = w * h - filled;
   const solved = unknown === 0 && triples.length === 0 && badRows.length === 0 && badCols.length === 0 && dupRows.length === 0 && dupCols.length === 0;
   return { triples, tripleCells, badRows, badCols, dupRows, dupCols, filled, unknown, solved };
 }
@@ -322,9 +337,10 @@ function deduce(ctx, steps, index, value, reason) {
   steps.push({ index, value, reason });
 }
 function lineOf(puzzle, kind, k) {
-  const n = puzzle.size;
+  const w = puzzle.width;
   const out = [];
-  for (let i = 0; i < n; i++) out.push(kind === "row" ? k * n + i : i * n + k);
+  const len = kind === "row" ? puzzle.width : puzzle.height;
+  for (let i = 0; i < len; i++) out.push(kind === "row" ? k * w + i : i * w + k);
   return out;
 }
 function lineLabel(kind, k) {
@@ -332,8 +348,10 @@ function lineLabel(kind, k) {
 }
 function allLines(puzzle) {
   const out = [];
-  for (let k = 0; k < puzzle.size; k++) {
+  for (let k = 0; k < puzzle.height; k++) {
     out.push({ kind: "row", k, cells: lineOf(puzzle, "row", k) });
+  }
+  for (let k = 0; k < puzzle.width; k++) {
     out.push({ kind: "col", k, cells: lineOf(puzzle, "col", k) });
   }
   return out;
@@ -430,7 +448,6 @@ var halfLockRule = {
   name: "\u534A\u6570\u540E\u5269\u4F59\u586B\u5F02\u8272",
   fn: (ctx) => {
     const steps = [];
-    const half = ctx.puzzle.size / 2;
     for (const line of allLines(ctx.puzzle)) {
       let black = 0;
       let white = 0;
@@ -443,6 +460,7 @@ var halfLockRule = {
       }
       if (!unknown.length) continue;
       const label = lineLabel(line.kind, line.k);
+      const half = line.cells.length / 2;
       if (black === half) {
         for (const idx2 of unknown) {
           deduce(
@@ -675,7 +693,7 @@ function propagate(puzzle, cells) {
   return ctx;
 }
 function isContradiction(puzzle, cells) {
-  const v = validate({ puzzleId: puzzle.id, size: puzzle.size, cells }, puzzle);
+  const v = validate({ puzzleId: puzzle.id, width: puzzle.width, height: puzzle.height, cells }, puzzle);
   return v.triples.length > 0 || v.badRows.length > 0 || v.badCols.length > 0 || v.dupRows.length > 0 || v.dupCols.length > 0;
 }
 function refutedBy(puzzle, cells, index, value) {
@@ -694,22 +712,23 @@ var hypothesisRule = {
     const steps = [];
     const deadline = ctx.deadline ?? Infinity;
     if (Date.now() > deadline) return steps;
-    const n = ctx.puzzle.size;
-    const total = n * n;
+    const w = ctx.puzzle.width;
+    const h = ctx.puzzle.height;
+    const total = w * h;
     if (ctx.cells.length !== total) return steps;
-    const rowBlank = new Array(n).fill(0);
-    const colBlank = new Array(n).fill(0);
+    const rowBlank = new Array(h).fill(0);
+    const colBlank = new Array(w).fill(0);
     const blanks = [];
     for (let i = 0; i < total; i++) {
       if (ctx.cells[i] !== 0 /* Unknown */) continue;
       blanks.push(i);
-      rowBlank[Math.floor(i / n)]++;
-      colBlank[i % n]++;
+      rowBlank[Math.floor(i / w)]++;
+      colBlank[i % w]++;
     }
     if (!blanks.length) return steps;
     blanks.sort((a, b) => {
-      const sa = rowBlank[Math.floor(a / n)] + colBlank[a % n];
-      const sb = rowBlank[Math.floor(b / n)] + colBlank[b % n];
+      const sa = rowBlank[Math.floor(a / w)] + colBlank[a % w];
+      const sb = rowBlank[Math.floor(b / w)] + colBlank[b % w];
       return sa - sb;
     });
     let tries = 0;
@@ -738,7 +757,7 @@ var RULES = [
 ];
 function planLogicSolve(puzzle, start) {
   const t0 = Date.now();
-  const total = puzzle.size * puzzle.size;
+  const total = puzzle.width * puzzle.height;
   const base = (start ?? puzzle.givens).slice();
   if (base.length !== total) {
     return {
@@ -806,12 +825,12 @@ var failIf = (cond, msg) => {
 console.log(`\u5171 ${puzzles.length} \u9053\u9898
 `);
 for (const p of puzzles) {
-  const total = p.size * p.size;
-  console.log(`${p.id}  ${p.size}\xD7${p.size}  ${p.difficulty}`);
+  const total = p.width * p.height;
+  console.log(`${p.id}  ${p.width}\xD7${p.height}  ${p.difficulty}`);
   let bad = false;
   bad ||= failIf(p.givens.length !== total, `givens \u957F\u5EA6 ${p.givens.length} \u2260 ${total}`);
   bad ||= failIf(!p.solution || p.solution.length !== total, "solution \u957F\u5EA6\u4E0D\u5BF9");
-  bad ||= failIf(p.size % 2 !== 0, `\u5C3A\u5BF8 ${p.size} \u4E0D\u662F\u5076\u6570`);
+  bad ||= failIf(p.width % 2 !== 0 || p.height % 2 !== 0, `\u5C3A\u5BF8 ${p.width}\xD7${p.height} \u4E0D\u662F\u5076\u6570`);
   if (bad) continue;
   for (let i = 0; i < total; i++) {
     if (p.givens[i] !== 0 /* Unknown */ && p.givens[i] !== p.solution[i]) {
@@ -858,7 +877,7 @@ for (const p of puzzles) {
   if (bad) continue;
   if (plan.complete) solvedByLogic++;
   console.log(
-    `  \u2713 ${p.id} \u4EC5\u51ED\u9898\u9762\u63A8\u51FA ${plan.steps.length}/${p.size * p.size} \u683C${plan.complete ? "\uFF08\u5DF2\u5168\u90E8\u89E3\u51FA\uFF09" : ""}`
+    `  \u2713 ${p.id} \u4EC5\u51ED\u9898\u9762\u63A8\u51FA ${plan.steps.length}/${p.width * p.height} \u683C${plan.complete ? "\uFF08\u5DF2\u5168\u90E8\u89E3\u51FA\uFF09" : ""}`
   );
 }
 console.log(

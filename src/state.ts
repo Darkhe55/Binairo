@@ -3,12 +3,12 @@ import { CellState as CS } from './types'
 
 /* ———————————————————— 索引 ———————————————————— */
 
-export function idx(size: number, x: number, y: number): number {
-  return y * size + x
+export function idx(width: number, x: number, y: number): number {
+  return y * width + x
 }
 
-export function inBoard(size: number, x: number, y: number): boolean {
-  return x >= 0 && y >= 0 && x < size && y < size
+export function inBoard(width: number, height: number, x: number, y: number): boolean {
+  return x >= 0 && y >= 0 && x < width && y < height
 }
 
 /* ———————————————————— 状态读写 ———————————————————— */
@@ -16,8 +16,9 @@ export function inBoard(size: number, x: number, y: number): boolean {
 export function createEmptyState(puzzle: Puzzle): GameState {
   return {
     puzzleId: puzzle.id,
-    size: puzzle.size,
-    cells: new Array<CellState>(puzzle.size * puzzle.size).fill(CS.Unknown),
+    width: puzzle.width,
+    height: puzzle.height,
+    cells: new Array<CellState>(puzzle.width * puzzle.height).fill(CS.Unknown),
   }
 }
 
@@ -56,7 +57,12 @@ export function invertMove(move: Move): Move {
 }
 
 export function cloneState(state: GameState): GameState {
-  return { puzzleId: state.puzzleId, size: state.size, cells: state.cells.slice() }
+  return {
+    puzzleId: state.puzzleId,
+    width: state.width,
+    height: state.height,
+    cells: state.cells.slice(),
+  }
 }
 
 /* ———————————————————— 存档 ———————————————————— */
@@ -65,7 +71,8 @@ export function serializeState(state: GameState) {
   return {
     version: 1 as const,
     puzzleId: state.puzzleId,
-    size: state.size,
+    width: state.width,
+    height: state.height,
     cells: state.cells.map((c) => c as number),
     updatedAt: Date.now(),
   }
@@ -74,12 +81,25 @@ export function serializeState(state: GameState) {
 export function deserializeState(data: {
   version: number
   puzzleId: string
-  size: number
+  width?: number
+  height?: number
+  /** 旧存档的边长（正方形） */
+  size?: number
   cells: number[]
 }): GameState {
+  const legacy = typeof data.size === 'number' && data.size > 0 ? data.size : 0
+  const width =
+    typeof data.width === 'number' && data.width > 0
+      ? data.width
+      : legacy || Math.round(Math.sqrt(data.cells.length))
+  const height =
+    typeof data.height === 'number' && data.height > 0
+      ? data.height
+      : legacy || width
   return {
     puzzleId: data.puzzleId,
-    size: data.size,
+    width,
+    height,
     cells: data.cells.map((n) => n as CellState),
   }
 }
@@ -93,14 +113,15 @@ export function isGiven(puzzle: Puzzle, index: number): boolean {
 
 /** 取出第 y 行 */
 export function rowOf(state: GameState, y: number): CellState[] {
-  const s = state.size
-  return state.cells.slice(y * s, y * s + s)
+  const w = state.width
+  return state.cells.slice(y * w, y * w + w)
 }
 
 /** 取出第 x 列 */
 export function colOf(state: GameState, x: number): CellState[] {
-  const s = state.size
+  const w = state.width
+  const h = state.height
   const out: CellState[] = []
-  for (let y = 0; y < s; y++) out.push(state.cells[y * s + x]!)
+  for (let y = 0; y < h; y++) out.push(state.cells[y * w + x]!)
   return out
 }

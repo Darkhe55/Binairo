@@ -42,18 +42,28 @@ export function loadSavedPuzzles(): Puzzle[] {
     const out: Puzzle[] = []
     for (const x of arr) {
       if (!x || typeof x !== 'object') continue
-      const r = x as { id?: unknown; name?: unknown; size?: unknown; givens?: unknown }
+      const r = x as {
+        id?: unknown
+        name?: unknown
+        size?: unknown
+        width?: unknown
+        height?: unknown
+        givens?: unknown
+      }
       if (typeof r.id !== 'string' || typeof r.givens !== 'string') continue
 
       const givens = decodeGivens(r.givens)
-      const size =
+      const legacySize =
         typeof r.size === 'number' && r.size > 0 ? r.size : Math.round(Math.sqrt(givens.length))
-      if (givens.length !== size * size) continue
+      const width = typeof r.width === 'number' && r.width > 0 ? r.width : legacySize
+      const height = typeof r.height === 'number' && r.height > 0 ? r.height : legacySize
+      if (width <= 0 || height <= 0 || givens.length !== width * height) continue
 
       out.push({
         id: r.id,
-        name: typeof r.name === 'string' && r.name ? r.name : `自定义 ${size}×${size}`,
-        size,
+        name: typeof r.name === 'string' && r.name ? r.name : `自定义 ${width}×${height}`,
+        width,
+        height,
         givens,
         difficulty: 'custom',
       })
@@ -68,7 +78,8 @@ function persistSavedPuzzles(list: Puzzle[]): void {
   const payload = list.map((p) => ({
     id: p.id,
     name: p.name,
-    size: p.size,
+    width: p.width,
+    height: p.height,
     givens: encodeGivens(p.givens),
   }))
   try {

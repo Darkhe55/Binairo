@@ -81,9 +81,10 @@ function deduce(
 
 /** 第 k 行/列的格子索引（row-major） */
 function lineOf(puzzle: Puzzle, kind: 'row' | 'col', k: number): number[] {
-  const n = puzzle.size
+  const w = puzzle.width
   const out: number[] = []
-  for (let i = 0; i < n; i++) out.push(kind === 'row' ? k * n + i : i * n + k)
+  const len = kind === 'row' ? puzzle.width : puzzle.height
+  for (let i = 0; i < len; i++) out.push(kind === 'row' ? k * w + i : i * w + k)
   return out
 }
 
@@ -93,8 +94,10 @@ function lineLabel(kind: 'row' | 'col', k: number): string {
 
 function allLines(puzzle: Puzzle): Array<{ kind: 'row' | 'col'; k: number; cells: number[] }> {
   const out: Array<{ kind: 'row' | 'col'; k: number; cells: number[] }> = []
-  for (let k = 0; k < puzzle.size; k++) {
+  for (let k = 0; k < puzzle.height; k++) {
     out.push({ kind: 'row', k, cells: lineOf(puzzle, 'row', k) })
+  }
+  for (let k = 0; k < puzzle.width; k++) {
     out.push({ kind: 'col', k, cells: lineOf(puzzle, 'col', k) })
   }
   return out
@@ -213,7 +216,6 @@ const halfLockRule: RuleMeta = {
   name: '半数后剩余填异色',
   fn: (ctx) => {
     const steps: LogicStep[] = []
-    const half = ctx.puzzle.size / 2
     for (const line of allLines(ctx.puzzle)) {
       let black = 0
       let white = 0
@@ -226,6 +228,7 @@ const halfLockRule: RuleMeta = {
       }
       if (!unknown.length) continue
       const label = lineLabel(line.kind, line.k)
+      const half = line.cells.length / 2
       // 每行/列黑白各占一半，所以某色一到半数，剩下只能全填另一种
       if (black === half) {
         for (const idx of unknown) {
@@ -541,7 +544,7 @@ function propagate(puzzle: Puzzle, cells: CellState[]): RuleCtx {
 
 /** 盘面是否已经违反某条硬规则 */
 function isContradiction(puzzle: Puzzle, cells: CellState[]): boolean {
-  const v = validate({ puzzleId: puzzle.id, size: puzzle.size, cells }, puzzle)
+  const v = validate({ puzzleId: puzzle.id, width: puzzle.width, height: puzzle.height, cells }, puzzle)
   return (
     v.triples.length > 0 ||
     v.badRows.length > 0 ||
@@ -579,23 +582,24 @@ const hypothesisRule: RuleMeta = {
     const deadline = ctx.deadline ?? Infinity
     if (Date.now() > deadline) return steps
 
-    const n = ctx.puzzle.size
-    const total = n * n
+    const w = ctx.puzzle.width
+    const h = ctx.puzzle.height
+    const total = w * h
     if (ctx.cells.length !== total) return steps
 
-    const rowBlank = new Array<number>(n).fill(0)
-    const colBlank = new Array<number>(n).fill(0)
+    const rowBlank = new Array<number>(h).fill(0)
+    const colBlank = new Array<number>(w).fill(0)
     const blanks: number[] = []
     for (let i = 0; i < total; i++) {
       if (ctx.cells[i] !== CS.Unknown) continue
       blanks.push(i)
-      rowBlank[Math.floor(i / n)]!++
-      colBlank[i % n]!++
+      rowBlank[Math.floor(i / w)]!++
+      colBlank[i % w]!++
     }
     if (!blanks.length) return steps
     blanks.sort((a, b) => {
-      const sa = rowBlank[Math.floor(a / n)]! + colBlank[a % n]!
-      const sb = rowBlank[Math.floor(b / n)]! + colBlank[b % n]!
+      const sa = rowBlank[Math.floor(a / w)]! + colBlank[a % w]!
+      const sb = rowBlank[Math.floor(b / w)]! + colBlank[b % w]!
       return sa - sb
     })
 
@@ -627,7 +631,7 @@ export const RULES: RuleMeta[] = [
 
 export function planLogicSolve(puzzle: Puzzle, start?: CellState[]): LogicPlan {
   const t0 = Date.now()
-  const total = puzzle.size * puzzle.size
+  const total = puzzle.width * puzzle.height
   const base = (start ?? puzzle.givens).slice()
   if (base.length !== total) {
     return {

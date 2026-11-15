@@ -5,6 +5,8 @@
  * 1. 每行、每列的黑子数 = 白子数（各占一半）
  * 2. 不能出现三个同色连排（横竖都一样）
  * 3. 任意两行不能完全相同，任意两列也不能完全相同
+ *
+ * 支持矩形题板：宽、高都为偶数即可；内置题都是正方形。
  */
 
 /** 格子状态：未定 / 黑 / 白 */
@@ -17,9 +19,11 @@ export const enum CellState {
 export interface Puzzle {
   id: string
   name: string
-  /** 棋盘边长（偶数，4/6/8/10/12） */
-  size: number
-  /** row-major，length = size*size；0 = 空白，1 = 黑，2 = 白 */
+  /** 棋盘宽（偶数） */
+  width: number
+  /** 棋盘高（偶数） */
+  height: number
+  /** row-major，length = width*height；0 = 空白，1 = 黑，2 = 白 */
   givens: CellState[]
   /** 参考解（提示用），row-major */
   solution?: CellState[]
@@ -28,8 +32,9 @@ export interface Puzzle {
 
 export interface GameState {
   puzzleId: string
-  size: number
-  /** row-major，length = size*size */
+  width: number
+  height: number
+  /** row-major，length = width*height */
   cells: CellState[]
 }
 

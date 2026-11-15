@@ -65,7 +65,9 @@ function loadSave(puzzleId: string): GameState | null {
     const data = JSON.parse(raw) as {
       version: number
       puzzleId: string
-      size: number
+      width?: number
+      height?: number
+      size?: number
       cells: number[]
     }
     if (data.version !== 1) return null
@@ -115,7 +117,8 @@ app.innerHTML = `
       <div class="custom-editor" id="custom-editor" hidden>
         <h2>自定义题板</h2>
         <div class="custom-row">
-          <label>边长 <input id="custom-n" type="number" min="4" max="40" step="2" value="6" /></label>
+          <label>宽 <input id="custom-w" type="number" min="4" max="40" step="2" value="6" /></label>
+          <label>高 <input id="custom-h" type="number" min="4" max="50" step="2" value="6" /></label>
           <button class="btn" id="custom-regen" type="button">生成网格</button>
         </div>
         <div class="custom-hint">点击格子循环：空 → 黑 → 白 → 空，摆好给定格后「载入题板」。｜ 键盘：方向键移动 · 1 填黑 · 2 填白 · . / 退格清空 · Enter / Tab 下一格（填满一行自动换行）· Home / End 行首行尾</div>
@@ -197,7 +200,7 @@ function renderPuzzleList() {
         <div class="puzzle-row">
           <button class="puzzle-item${active}" data-id="${p.id}" type="button">
             <span class="title">${p.name}</span>
-            <span class="meta">${p.size}×${p.size} · ${difficultyLabel(p.difficulty)} · ${givenCount(p)} 个给定格</span>
+            <span class="meta">${p.width}×${p.height} · ${difficultyLabel(p.difficulty)} · ${givenCount(p)} 个给定格</span>
           </button>
           ${del}
         </div>
@@ -254,7 +257,7 @@ function refresh() {
     setStatus('完成！三条规则全部满足。', 'ok')
     return
   }
-  const bits: string[] = [`已填 ${result.filled}/${session.puzzle.size * session.puzzle.size}`]
+  const bits: string[] = [`已填 ${result.filled}/${session.puzzle.width * session.puzzle.height}`]
   if (result.triples.length) bits.push(`${result.triples.length} 处三连`)
   if (result.badRows.length) bits.push(`${result.badRows.length} 行黑白不均`)
   if (result.badCols.length) bits.push(`${result.badCols.length} 列黑白不均`)
@@ -341,7 +344,7 @@ function clearBoard(): void {
   if (!session) return
   stopLogic()
   const targets = []
-  for (let i = 0; i < session.puzzle.size * session.puzzle.size; i++) {
+  for (let i = 0; i < session.puzzle.width * session.puzzle.height; i++) {
     if (isGiven(session.puzzle, i)) continue
     targets.push({ index: i, value: CS.Unknown })
   }
@@ -820,13 +823,16 @@ async function playLogicPlan(live: Session, steps: LogicStep[], token: number): 
 
 /* ———————————————————— 自定义题板 ———————————————————— */
 
-/** 自定义题板边长范围（必须偶数，黑白才能各半） */
-const CUSTOM_MIN = 4
-const CUSTOM_MAX = 40
+/** 自定义题板宽高范围（必须偶数，黑白才能各半） */
+const CUSTOM_MIN_W = 4
+const CUSTOM_MIN_H = 4
+const CUSTOM_MAX_W = 40
+const CUSTOM_MAX_H = 50
 
-let customN = 6
+let customW = 6
+let customH = 6
 let customGivens: CellState[] = new Array<CellState>(36).fill(CS.Unknown)
-/** 键盘光标所在格（0..customN²-1），-1 表示未选 */
+/** 键盘光标所在格（0..customW*customH-1），-1 表示未选 */
 let customCursor = -1
 
 function customMsg(text: string, tone: 'ok' | 'bad' | '' = '') {
@@ -839,9 +845,9 @@ function customMsg(text: string, tone: 'ok' | 'bad' | '' = '') {
 function renderCustomGrid(): void {
   const grid = $('#custom-grid')
   grid.tabIndex = 0
-  grid.style.gridTemplateColumns = `repeat(${customN}, 34px)`
+  grid.style.gridTemplateColumns = `repeat(${customW}, 34px)`
   const parts: string[] = []
-  for (let i = 0; i < customN * customN; i++) {
+  for (let i = 0; i < customW * customH; i++) {
     const v = customGivens[i]
     const sel = i === customCursor ? ' selected' : ''
     const cls = v === CS.Black ? 'custom-cell black' : v === CS.White ? 'custom-cell white' : 'custom-cell'
@@ -860,14 +866,13 @@ function renderCustomGrid(): void {
 
 /** 移动键盘光标并保持它在盘面内；出界时夹住不动 */
 function customMoveCursor(dx: number, dy: number): void {
-  const n = customN
-  if (n <= 0) return
+  if (customW <= 0 || customH <= 0) return
   const from = customCursor < 0 ? 0 : customCursor
-  const row = Math.floor(from / n)
-  const col = from % n
-  const r = Math.min(Math.max(row + dy, 0), n - 1)
-  const c = Math.min(Math.max(col + dx, 0), n - 1)
-  customCursor = r * n + c
+  const row = Math.floor(from / customW)
+  const col = from % customW
+  const r = Math.min(Math.max(row + dy, 0), customH - 1)
+  const c = Math.min(Math.max(col + dx, 0), customW - 1)
+  customCursor = r * customW + c
   renderCustomGrid()
   // 大题板下把光标滚进可视区
   const btn = document.querySelector<HTMLButtonElement>(
@@ -878,10 +883,9 @@ function customMoveCursor(dx: number, dy: number): void {
 
 /** 跳到某一行的行首/行尾 */
 function customCursorToEdge(edge: 'home' | 'end'): void {
-  const n = customN
-  if (n <= 0) return
-  const row = Math.floor((customCursor < 0 ? 0 : customCursor) / n)
-  customCursor = edge === 'home' ? row * n : row * n + n - 1
+  if (customW <= 0 || customH <= 0) return
+  const row = Math.floor((customCursor < 0 ? 0 : customCursor) / customW)
+  customCursor = edge === 'home' ? row * customW : row * customW + customW - 1
   renderCustomGrid()
   const btn = document.querySelector<HTMLButtonElement>(
     `.custom-cell[data-i="${customCursor}"]`,
@@ -903,7 +907,7 @@ function scrollCursorIntoView(): void {
  * 填色、清空、Enter/Tab 都走这里，填满一行后自动换行。
  */
 function customAdvance(step: 1 | -1): void {
-  const total = customN * customN
+  const total = customW * customH
   if (total <= 0) return
   const from = customCursor < 0 ? 0 : customCursor
   customCursor = Math.min(Math.max(from + step, 0), total - 1)
@@ -980,24 +984,29 @@ function customEditorKeydown(e: KeyboardEvent): boolean {
 }
 
 function readCustomSize(): void {
-  let n = Number($input('#custom-n').value) || 6
-  if (n % 2 !== 0) n += 1
-  customN = Math.min(Math.max(n, CUSTOM_MIN), CUSTOM_MAX)
+  const even = (v: number, min: number, max: number) => {
+    const n = Math.min(Math.max(Math.round(v) || min, min), max)
+    return n % 2 === 0 ? n : Math.min(n + 1, max)
+  }
+  customW = even(Number($input('#custom-w').value), CUSTOM_MIN_W, CUSTOM_MAX_W)
+  customH = even(Number($input('#custom-h').value), CUSTOM_MIN_H, CUSTOM_MAX_H)
+  $input('#custom-w').value = String(customW)
+  $input('#custom-h').value = String(customH)
 }
 
 function regenCustomGrid(): void {
   readCustomSize()
-  customGivens = new Array<CellState>(customN * customN).fill(CS.Unknown)
+  customGivens = new Array<CellState>(customW * customH).fill(CS.Unknown)
   customCursor = 0
   renderCustomGrid()
-  customMsg(`已生成 ${customN}×${customN} 网格。方向键移动 · 1 填黑 · 2 填白 · . 清空。`)
+  customMsg(`已生成 ${customW}×${customH} 网格。方向键移动 · 1 填黑 · 2 填白 · . 清空。`)
   $('#custom-grid').focus()
 }
 
 function openCustomEditor(): void {
   $('#custom-editor').hidden = false
   readCustomSize()
-  customGivens = new Array<CellState>(customN * customN).fill(CS.Unknown)
+  customGivens = new Array<CellState>(customW * customH).fill(CS.Unknown)
   customCursor = 0
   renderCustomGrid()
   customMsg('点击格子循环：空 → 黑 → 白 → 空；也可用键盘：方向键移动 · 1 填黑 · 2 填白 · . 清空（填满一行自动换到下一行）。')
@@ -1012,9 +1021,10 @@ function closeCustomEditor(): void {
 function customPuzzle(): Puzzle {
   return {
     // 同一张题板恒定同一个 id：重复保存是覆盖，刷新后也不会变
-    id: customPuzzleId(customGivens),
-    name: `自定义 ${customN}×${customN}`,
-    size: customN,
+    id: `custom-${customW}x${customH}-${customPuzzleId(customGivens)}`,
+    name: `自定义 ${customW}×${customH}`,
+    width: customW,
+    height: customH,
     givens: customGivens.slice(),
     difficulty: 'custom',
   }
@@ -1034,7 +1044,7 @@ function saveCustomPuzzle(): void {
     return
   }
   const base = customPuzzle()
-  const name = `自定义 ${base.size}×${base.size} · ${stampLabel()}`
+  const name = `自定义 ${base.width}×${base.height} · ${stampLabel()}`
   const saved = savePuzzleToLibrary({ ...base, name })
   library = [...puzzles, ...saved]
   renderPuzzleList()
@@ -1062,10 +1072,10 @@ function deleteSavedPuzzle(id: string): void {
 /** 读边长输入并保证网格和它一致：改了边长却没点「生成网格」时重建网格 */
 function syncCustomSize(): boolean {
   readCustomSize()
-  if (customGivens.length === customN * customN) return true
-  customGivens = new Array<CellState>(customN * customN).fill(CS.Unknown)
+  if (customGivens.length === customW * customH) return true
+  customGivens = new Array<CellState>(customW * customH).fill(CS.Unknown)
   renderCustomGrid()
-  customMsg(`边长已改为 ${customN}，网格随之重置，请重新摆给定格。`, 'bad')
+  customMsg(`尺寸已改为 ${customW}×${customH}，网格随之重置，请重新摆给定格。`, 'bad')
   return false
 }
 
@@ -1111,8 +1121,8 @@ function playCellFx(cell: number, positive: boolean, force = false): void {
   const svg = currentSvg()
   if (!svg) return
   const m = metricsFor(session.puzzle)
-  const cx = cell % m.size
-  const cy = Math.floor(cell / m.size)
+  const cx = cell % m.width
+  const cy = Math.floor(cell / m.width)
   const center = cellCenter(m, cx, cy)
   const el = svg.querySelector<SVGElement>(`[data-cell="${cell}"]`)
   const streak = bumpStreak(positive ? 'pos' : 'neg')

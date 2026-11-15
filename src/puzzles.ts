@@ -9,7 +9,8 @@ function toPuzzle(r: RawPuzzle): Puzzle {
   return {
     id: r.id,
     name: r.name,
-    size: r.size,
+    width: r.size,
+    height: r.size,
     difficulty: r.difficulty,
     givens: parseCells(r.givens),
     solution: parseCells(r.solution),

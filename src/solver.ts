@@ -3,8 +3,8 @@
  *
  * 剪枝：
  *  - 三连：落子后横竖出现三连 → 回退
- *  - 等量：某行/列黑（或白）已到 size/2 → 该行/列其余格子只能填另一种
- *  - 可达性：某行/列「已填黑 + 未定」< size/2 → 永远凑不齐 → 回退
+ *  - 等量：某行黑（或白）已到 width/2、某列已到 height/2 → 其余格子只能填另一种
+ *  - 可达性：某行/列「已填黑 + 未定」< 目标数 → 永远凑不齐 → 回退
  *  - 行/列重复：填满一行时若与已填满的行相同 → 回退（列同理）
  */
 import { cellValue, colOf, createEmptyState, idx, rowOf } from './state'
@@ -30,7 +30,8 @@ export interface SearchOptions {
 const COLORS: readonly CellState[] = [CS.Black, CS.White]
 
 class Searcher {
-  readonly size: number
+  readonly width: number
+  readonly height: number
   private readonly puzzle: Puzzle
   private readonly cells: CellState[]
   private readonly blackInRow: Int32Array
@@ -49,15 +50,16 @@ class Searcher {
   timedOut = false
 
   constructor(puzzle: Puzzle, opts: SearchOptions = {}) {
-    this.size = puzzle.size
+    this.width = puzzle.width
+    this.height = puzzle.height
     this.puzzle = puzzle
-    this.cells = new Array<CellState>(this.size * this.size).fill(CS.Unknown)
-    this.blackInRow = new Int32Array(this.size)
-    this.whiteInRow = new Int32Array(this.size)
-    this.blackInCol = new Int32Array(this.size)
-    this.whiteInCol = new Int32Array(this.size)
-    this.freeInRow = new Int32Array(this.size).fill(this.size)
-    this.freeInCol = new Int32Array(this.size).fill(this.size)
+    this.cells = new Array<CellState>(this.width * this.height).fill(CS.Unknown)
+    this.blackInRow = new Int32Array(this.height)
+    this.whiteInRow = new Int32Array(this.height)
+    this.blackInCol = new Int32Array(this.width)
+    this.whiteInCol = new Int32Array(this.width)
+    this.freeInRow = new Int32Array(this.height).fill(this.width)
+    this.freeInCol = new Int32Array(this.width).fill(this.height)
 
     // 题面固定格直接落座
     for (let i = 0; i < puzzle.givens.length; i++) {
@@ -72,16 +74,16 @@ class Searcher {
     this.rng = opts.rng
 
     // 题面固定格可能已经让某些行/列填满，先登记进去（givens 永不被撤销）
-    for (let y = 0; y < this.size; y++) {
+    for (let y = 0; y < this.height; y++) {
       if (this.freeInRow[y] === 0) this.fullRows.push(rowOf(this.asState(), y))
     }
-    for (let x = 0; x < this.size; x++) {
+    for (let x = 0; x < this.width; x++) {
       if (this.freeInCol[x] === 0) this.fullCols.push(colOf(this.asState(), x))
     }
   }
   private book(index: number, value: CellState, sign: 1 | -1): void {
-    const x = index % this.size
-    const y = Math.floor(index / this.size)
+    const x = index % this.width
+    const y = Math.floor(index / this.width)
     this.freeInRow[y]! -= sign
     this.freeInCol[x]! -= sign
     if (value === CS.Black) {
@@ -107,9 +109,10 @@ class Searcher {
 
   /** 落子后是否仍自洽 */
   private okAfter(index: number, value: CellState): boolean {
-    const x = index % this.size
-    const y = Math.floor(index / this.size)
-    const half = this.size / 2
+    const x = index % this.width
+    const y = Math.floor(index / this.width)
+    const halfRow = this.width / 2
+    const halfCol = this.height / 2
 
     // 三连（只看包含本格的那三段）
     const row = rowOf(this.asState(), y)
@@ -128,18 +131,23 @@ class Searcher {
     // 等量上限 + 可达性
     const black = value === CS.Black ? this.blackInRow[y]! : this.whiteInRow[y]!
     const white = value === CS.White ? this.whiteInRow[y]! : this.blackInRow[y]!
-    if (black > half || white > half) return false
-    if (black + this.freeInRow[y]! < half) return false
+    if (black > halfRow || white > halfRow) return false
+    if (black + this.freeInRow[y]! < halfRow) return false
     const blackC = value === CS.Black ? this.blackInCol[x]! : this.whiteInCol[x]!
     const whiteC = value === CS.White ? this.whiteInCol[x]! : this.blackInCol[x]!
-    if (blackC > half || whiteC > half) return false
-    if (blackC + this.freeInCol[x]! < half) return false
+    if (blackC > halfCol || whiteC > halfCol) return false
+    if (blackC + this.freeInCol[x]! < halfCol) return false
 
     return true
   }
 
   private asState(): GameState {
-    return { puzzleId: this.puzzle.id, size: this.size, cells: this.cells }
+    return {
+      puzzleId: this.puzzle.id,
+      width: this.width,
+      height: this.height,
+      cells: this.cells,
+    }
   }
 
   /** 行/列刚被填满时，查是否与已登记的行/列重复 */
@@ -156,7 +164,7 @@ class Searcher {
   }
 
   search(onFound: (cells: CellState[]) => boolean): boolean {
-    const total = this.size * this.size
+    const total = this.width * this.height
     // 待定格子（题面固定格已排除）
     const order: number[] = []
     for (let i = 0; i < total; i++) if (this.cells[i] === CS.Unknown) order.push(i)
@@ -166,8 +174,8 @@ class Searcher {
       this.nodes++
       if (!this.checkBudget()) return true
       const i = order[k]!
-      const x = i % this.size
-      const y = Math.floor(i / this.size)
+      const x = i % this.width
+      const y = Math.floor(i / this.width)
       const colors = this.rng
         ? this.rng() < 0.5
           ? [CS.Black, CS.White]
@@ -177,9 +185,11 @@ class Searcher {
         this.cells[i] = v
         this.book(i, v, 1)
 
+        const halfRow = this.width / 2
+        const halfCol = this.height / 2
         const okCounts =
-          (v === CS.Black ? this.blackInRow[y]! : this.whiteInRow[y]!) <= this.size / 2 &&
-          (v === CS.Black ? this.blackInCol[x]! : this.whiteInCol[x]!) <= this.size / 2
+          (v === CS.Black ? this.blackInRow[y]! : this.whiteInRow[y]!) <= halfRow &&
+          (v === CS.Black ? this.blackInCol[x]! : this.whiteInCol[x]!) <= halfCol
 
         // 行/列刚填满：先查重，通过后再登记（撤销时弹出）
         const rowJustFilled = this.freeInRow[y] === 0
