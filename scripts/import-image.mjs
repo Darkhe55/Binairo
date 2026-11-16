@@ -326,7 +326,7 @@ async function analyzeImage({ imageFile, edge, size, width, height }) {
 // ───────────────────────────── 写入题库 ─────────────────────────────
 
 function appendEntry(entry) {
-  const line = `  { id: ${JSON.stringify(entry.id)}, name: ${JSON.stringify(entry.name)}, size: ${entry.size}, difficulty: ${JSON.stringify(entry.difficulty)}, series: ${JSON.stringify(entry.series)}, givens: ${JSON.stringify(entry.givens)}, solution: ${JSON.stringify(entry.solution ?? '')} },\n`
+  const line = `  { id: ${JSON.stringify(entry.id)}, name: ${JSON.stringify(entry.name)}, width: ${entry.width}, height: ${entry.height}, difficulty: ${JSON.stringify(entry.difficulty)}, series: ${JSON.stringify(entry.series)}, givens: ${JSON.stringify(entry.givens)}, solution: ${JSON.stringify(entry.solution ?? '')} },\n`
   if (!existsSync(DATA_FILE)) {
     writeFileSync(
       DATA_FILE,
@@ -359,11 +359,12 @@ if (detected.error) {
   process.exit(1)
 }
 const { width, height, grid } = detected
-if (width !== height) {
-  console.error(`[import] 黑白题库只支持正方形题板，识别到 ${width}×${height}`)
+// 黑白规则要求每行、每列黑白等量，因此宽高都必须是偶数；矩形题板（宽 ≠ 高）同样支持。
+if (width % 2 !== 0 || height % 2 !== 0) {
+  console.error(`[import] 黑白要求棋盘宽高都是偶数，识别到 ${width}×${height}`)
   process.exit(1)
 }
-const size = width * height
+const total = width * height
 let cells = detected.cells.slice()
 
 // --map 人工覆盖：r,c=值（行列从 1 开始；B/1=黑，W/2=白，./0=空）
@@ -381,7 +382,7 @@ for (const spec of opts.map) {
 }
 const black = cells.filter((v) => v === 1).length
 const white = cells.filter((v) => v === 2).length
-const empty = size - black - white
+const empty = total - black - white
 console.log(
   `[import] 网格 ${width}×${height}，格子 ${grid.cellW.toFixed(2)}×${grid.cellH.toFixed(2)}px，图片 ${grid.imageW}×${grid.imageH}；` +
     `黑子 ${black}、白子 ${white}、空格 ${empty}`,
@@ -404,7 +405,7 @@ const id = opts.id || `binairo-${width}x${height}-${hashId(givens)}`
 const name = opts.name || `识图 · ${width}×${height}`
 const difficulty = opts.difficulty || 'hard'
 const series = opts.series || '图片导入'
-const entry = { id, name, size: width, difficulty, series, givens, solution: '' }
+const entry = { id, name, width, height, difficulty, series, givens, solution: '' }
 
 if (opts.dry) {
   console.log('[import] --dry：仅识别，不求解、不写入。')

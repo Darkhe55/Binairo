@@ -2,12 +2,17 @@
 export type RawPuzzle = {
   id: string
   name: string
-  size: number
+  /** 正方形边长（旧格式；矩形题改用 width/height，两者都给时以 width/height 为准） */
+  size?: number
+  /** 棋盘宽（偶数；可省略，省略时用 size） */
+  width?: number
+  /** 棋盘高（偶数；可省略，省略时用 size） */
+  height?: number
   difficulty: 'easy'|'medium'|'hard'|'custom'
   series: string
-  /** 题面：'.' = 空白，'B' = 黑，'W' = 白；length = size*size，row-major */
+  /** 题面：'.' = 空白，'B' = 黑，'W' = 白；length = width*height，row-major */
   givens: string
-  /** 参考解：'B' / 'W'；length = size*size，row-major */
+  /** 参考解：'B' / 'W'；length = width*height，row-major */
   solution: string
 }
 

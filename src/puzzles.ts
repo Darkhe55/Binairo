@@ -7,11 +7,14 @@ function parseCells(s: string) {
 }
 
 function toPuzzle(r: RawPuzzle): Puzzle {
+  // 兼容两代题库格式：旧条目只有 size（正方形）；矩形题给 width/height。
+  const width = r.width ?? r.size ?? 0
+  const height = r.height ?? r.size ?? 0
   return {
     id: r.id,
     name: r.name,
-    width: r.size,
-    height: r.size,
+    width,
+    height,
     difficulty: r.difficulty,
     givens: parseCells(r.givens),
     solution: parseCells(r.solution),
