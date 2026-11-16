@@ -76,3 +76,36 @@ npm run build     # tsc --noEmit + vite build
 npm run gen       # 重新生成题库
 npm run check     # 审计题库
 ```
+
+## 图片识别导入
+
+用 Playwright + Edge 识别题面图片里的网格与黑白圆子，生成题库格式后预览 / 写入。
+
+```bash
+# 只识别 + 预览（默认会做唯一性检查）
+npm run import-image -- 题面.png
+
+# 只识别网格与圆子
+npm run import-image -- 题面.png --dry
+
+# 人工修正个别格子后追加到题库（写入 src/imported-puzzles.ts，npm run gen 不会覆盖）
+npm run import-image -- 题面.png --map 3,4=B --name "我的黑白" --append
+```
+
+| 参数 | 说明 |
+|------|------|
+| `--name 名称` | 题库中显示的名称（默认「识图 · W×H」） |
+| `--series 系列` | 系列名（默认「图片导入」） |
+| `--difficulty 级别` | `easy` / `medium` / `hard` / `custom`（默认 `hard`） |
+| `--size N` | 正方形网格边长；默认自动识别 |
+| `--map 行,列=值` | 人工覆盖某格（行列从 1 开始；`B`/`1` = 黑，`W`/`2` = 白，`.`/`0` = 空） |
+| `--append` | 写入 `src/imported-puzzles.ts` |
+| `--verify` | 唯一性检查（`--append` 时也会自动执行） |
+| `--dry` | 只识别网格与圆子，不求解、不写入 |
+| `--max-nodes N` / `--time-budget MS` | 唯一性搜索节点 / 时间上限 |
+| `--edge PATH` | 指定 Edge 路径（默认自动探测） |
+
+识别流程：以亮度众数作背景 → 多档阈值投影找网格线 → 每格中心暗度判断实心黑子、中心留白 + 深色圆环判断空心白子 →
+生成 `B/W/.` 题面串。内置题截图也可以直接导入（可用 `--map` 修正个别格子）。
+注意：`src/types.ts` 使用了 `const enum`，脚本会自动用 `--experimental-transform-types` 重新启动自己。
+

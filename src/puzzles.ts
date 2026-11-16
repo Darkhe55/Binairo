@@ -1,5 +1,6 @@
 import type { Puzzle } from './types'
 import { RAW_PUZZLES, type RawPuzzle } from './puzzles-data'
+import { IMPORTED_PUZZLES } from './imported-puzzles'
 
 function parseCells(s: string) {
   return [...s].map((ch) => (ch === '.' ? 0 : ch === 'B' ? 1 : 2)) as Puzzle['givens']
@@ -17,8 +18,9 @@ function toPuzzle(r: RawPuzzle): Puzzle {
   }
 }
 
-/** 静态题库（import 即用，无运行时生成） */
-export const puzzles: Puzzle[] = RAW_PUZZLES.map(toPuzzle)
+/** 静态题库 + 图片识别导入的题（import 即用，无运行时生成） */
+const ALL_RAW: RawPuzzle[] = [...RAW_PUZZLES, ...IMPORTED_PUZZLES]
+export const puzzles: Puzzle[] = ALL_RAW.map(toPuzzle)
 
 export function getPuzzle(id: string): Puzzle | undefined {
   return puzzles.find((p) => p.id === id)
@@ -35,9 +37,10 @@ export function givenCount(p: Puzzle): number {
 }
 
 export function listSeries(): string[] {
-  return [...new Set(RAW_PUZZLES.map((r) => r.series))]
+  return [...new Set(ALL_RAW.map((r) => r.series))]
 }
 
 export function bySeries(series: string): Puzzle[] {
-  return RAW_PUZZLES.filter((r) => r.series === series).map(toPuzzle)
+  return ALL_RAW.filter((r) => r.series === series).map(toPuzzle)
 }
+
