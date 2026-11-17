@@ -7,22 +7,28 @@ var RAW_PUZZLES = [
   { id: "challenge-12x12", name: "\u6311\u6218 \xB7 12\xD712", size: 12, difficulty: "hard", series: "challenge", givens: "B....WW.W.W.B.W.B..W....WW.W...WBW...W..W....WW......WB............W..B....W....B.W.B..W.W.W....W..B.....W.......B.......B...BWB.B..B...BW...WB.", solution: "BBWBBWWBWBWWBBWBBWBWWBWWWWBWWBBWBWBBWWBBWBWBBWWBBBWWBWBBWBWWWWBBWBWWBWBBWBBWWBWBBWWBBBWWBWBWWBBWWWBBWWBBWWBBBWWBWBWWBBWBWBWWBBWBWBBWBWBWBWBWBWBW" }
 ];
 
+// src/imported-puzzles.ts
+var IMPORTED_PUZZLES = [];
+
 // src/puzzles.ts
 function parseCells(s) {
   return [...s].map((ch) => ch === "." ? 0 : ch === "B" ? 1 : 2);
 }
 function toPuzzle(r) {
+  const width = r.width ?? r.size ?? 0;
+  const height = r.height ?? r.size ?? 0;
   return {
     id: r.id,
     name: r.name,
-    width: r.size,
-    height: r.size,
+    width,
+    height,
     difficulty: r.difficulty,
     givens: parseCells(r.givens),
     solution: parseCells(r.solution)
   };
 }
-var puzzles = RAW_PUZZLES.map(toPuzzle);
+var ALL_RAW = [...RAW_PUZZLES, ...IMPORTED_PUZZLES];
+var puzzles = ALL_RAW.map(toPuzzle);
 
 // src/state.ts
 function idx(width, x, y) {
